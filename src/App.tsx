@@ -702,32 +702,62 @@ export function App() {
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+    let rafId: number | null = null;
+    let pendingZoomDelta = 0;
+    let pendingPanX = 0;
+    let pendingPanY = 0;
+    let lastCursorX = 0;
+    let lastCursorY = 0;
+
+    const flushWheel = () => {
+      rafId = null;
+      const zoomDelta = pendingZoomDelta;
+      const panX = pendingPanX;
+      const panY = pendingPanY;
+      const cx = lastCursorX;
+      const cy = lastCursorY;
+      pendingZoomDelta = 0;
+      pendingPanX = 0;
+      pendingPanY = 0;
+
+      setViewport((v) => {
+        let nextX = v.x - panX;
+        let nextY = v.y - panY;
+        let nextScale = v.scale;
+        if (zoomDelta !== 0) {
+          const factor = Math.exp(-zoomDelta * 0.00495);
+          nextScale = Math.min(2.6, Math.max(0.2, v.scale * factor));
+          const ratio = nextScale / v.scale;
+          nextX = cx - (cx - nextX) * ratio;
+          nextY = cy - (cy - nextY) * ratio;
+        }
+        return { x: nextX, y: nextY, scale: nextScale };
+      });
+    };
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
         const rect = el.getBoundingClientRect();
-        const cursorX = e.clientX - rect.left;
-        const cursorY = e.clientY - rect.top;
+        lastCursorX = e.clientX - rect.left;
+        lastCursorY = e.clientY - rect.top;
         const rawDelta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-        const clampedDelta = Math.max(-60, Math.min(60, rawDelta));
-        const factor = Math.exp(-clampedDelta * 0.0033);
-        setViewport((v) => {
-          const nextScale = Math.min(2.6, Math.max(0.2, v.scale * factor));
-          const ratio = nextScale / v.scale;
-          return {
-            x: cursorX - (cursorX - v.x) * ratio,
-            y: cursorY - (cursorY - v.y) * ratio,
-            scale: nextScale,
-          };
-        });
+        pendingZoomDelta += Math.max(-60, Math.min(60, rawDelta));
       } else if (e.shiftKey) {
-        setViewport((v) => ({ ...v, x: v.x - (e.deltaY || e.deltaX) }));
+        pendingPanX += e.deltaY || e.deltaX;
       } else {
-        setViewport((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+        pendingPanX += e.deltaX;
+        pendingPanY += e.deltaY;
+      }
+      if (rafId === null) {
+        rafId = window.requestAnimationFrame(flushWheel);
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const attachFilesToNode = useCallback(
