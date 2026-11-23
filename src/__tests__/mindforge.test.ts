@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { LayoutNodeInfo } from "../types/mindmap";
 import { extractMarkdownFromHtml, renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   callLlmProvider,
@@ -13,7 +14,15 @@ import {
   saveLlmConversations,
 } from "../utils/llmMindMapAgent";
 import { parseMarkdownToSubtree } from "../utils/markdownToSubtree";
-import { computeMindMapLayout } from "../utils/layoutEngine";
+import {
+  buildCrossLinkPath,
+  clampCrossLinkLabel,
+  computeMindMapLayout,
+  countSentences,
+  MAX_CROSSLINK_LABEL_CHARS,
+  MAX_CROSSLINK_LABEL_SENTENCES,
+  wrapCrossLinkLabelLines,
+} from "../utils/layoutEngine";
 import {
   addChildNode,
   addDetachedRootNode,
@@ -609,5 +618,118 @@ describe("LLM Mind Map Assistant Agent", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("Cross-Link Label Limits and Smart Behind-Layer Placement", () => {
+  it("enforces max 5 sentences and ~500 char limit for cross-link labels and wraps cleanly", () => {
+    expect(countSentences("")).toBe(0);
+    expect(countSentences("v1.2 connects cleanly. Next?")).toBe(2);
+
+    const fiveSentences =
+      "First sentence. Second sentence! Third sentence? Fourth sentence. Fifth sentence.";
+    expect(countSentences(fiveSentences)).toBe(MAX_CROSSLINK_LABEL_SENTENCES);
+    expect(clampCrossLinkLabel(fiveSentences)).toBe(fiveSentences);
+
+    const sixSentences = `${fiveSentences} Sixth sentence should be trimmed.`;
+    expect(clampCrossLinkLabel(sixSentences)).toBe(fiveSentences);
+
+    const longProse = "a".repeat(MAX_CROSSLINK_LABEL_CHARS + 120);
+    expect(clampCrossLinkLabel(longProse).length).toBe(MAX_CROSSLINK_LABEL_CHARS);
+
+    const wrapped = wrapCrossLinkLabelLines(fiveSentences, 36);
+    expect(wrapped.length).toBeGreaterThan(1);
+    expect(wrapped.join(" ")).toBe(fiveSentences);
+  });
+
+  it("relocates obscured Behind-layer cross-link labels to the middle of available horizontal space and elevates label alone when map has no free space", () => {
+    const from: LayoutNodeInfo = {
+      id: "from",
+      x: 0,
+      y: 100,
+      width: 120,
+      height: 50,
+      depth: 1,
+      branchColor: "#2563eb",
+      side: "left",
+      rootId: "root",
+    };
+    const to: LayoutNodeInfo = {
+      id: "to",
+      x: 520,
+      y: 100,
+      width: 120,
+      height: 50,
+      depth: 1,
+      branchColor: "#2563eb",
+      side: "right",
+      rootId: "root",
+    };
+    const blocker: LayoutNodeInfo = {
+      id: "blocker",
+      x: 240,
+      y: 80,
+      width: 140,
+      height: 120,
+      depth: 0,
+      branchColor: "#2563eb",
+      side: "center",
+      rootId: "root",
+    };
+
+    // Unobscured Behind layer keeps default midpoint
+    const clearBehind = buildCrossLinkPath(from, to, {
+      layouts: { from, to },
+      label: "depends on",
+      layer: "behind",
+    });
+    expect(clearBehind.relocated).toBe(false);
+    expect(clearBehind.forceLabelAbove).toBe(false);
+
+    // Above layer stays at default midpoint even over a node
+    const aboveOverNode = buildCrossLinkPath(from, to, {
+      layouts: { from, to, blocker },
+      label: "depends on",
+      layer: "above",
+    });
+    expect(aboveOverNode.relocated).toBe(false);
+    expect(aboveOverNode.forceLabelAbove).toBe(false);
+
+    // Obscured Behind layer relocates into the open horizontal gap [380, 520] (middle ~450)
+    const relocated = buildCrossLinkPath(from, to, {
+      layouts: { from, to, blocker },
+      label: "depends on",
+      layer: "behind",
+    });
+    expect(relocated.relocated).toBe(true);
+    expect(relocated.forceLabelAbove).toBe(false);
+    expect(relocated.labelX).toBeGreaterThan(blocker.x + blocker.width);
+    expect(relocated.labelX).toBeLessThan(to.x);
+
+    // Densely packed map with no free horizontal or vertical space elevates text label alone
+    const denseLayouts: Record<string, LayoutNodeInfo> = { from, to };
+    let idx = 0;
+    for (let x = 110; x <= 480; x += 110) {
+      for (let y = 40; y <= 260; y += 60) {
+        const id = `dense-${idx++}`;
+        denseLayouts[id] = {
+          id,
+          x,
+          y,
+          width: 104,
+          height: 54,
+          depth: 1,
+          branchColor: "#2563eb",
+          side: "right",
+          rootId: "root",
+        };
+      }
+    }
+    const denseResult = buildCrossLinkPath(from, to, {
+      layouts: denseLayouts,
+      label: "Dense cross-link dependency label",
+      layer: "behind",
+    });
+    expect(denseResult.forceLabelAbove).toBe(true);
   });
 });

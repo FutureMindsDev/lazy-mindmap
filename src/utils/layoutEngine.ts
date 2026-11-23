@@ -1,5 +1,6 @@
 import type {
   ConnectorStyle,
+  CrossLinkLayer,
   LayoutMode,
   LayoutNodeInfo,
   MindMapDocument,
@@ -360,10 +361,127 @@ export function buildConnectorPath(
   return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
 }
 
+export const MAX_CROSSLINK_LABEL_CHARS = 500;
+export const MAX_CROSSLINK_LABEL_SENTENCES = 5;
+
+export function countSentences(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  const terminators = Array.from(trimmed.matchAll(/[.!?]+(?=\s|$)/g));
+  if (terminators.length === 0) return 1;
+  const last = terminators[terminators.length - 1];
+  const endIdx = (last.index ?? 0) + last[0].length;
+  const trailing = trimmed.slice(endIdx).trim();
+  return terminators.length + (trailing.length > 0 ? 1 : 0);
+}
+
+export function clampCrossLinkLabel(text: string): string {
+  if (!text) return "";
+  let clamped = text.slice(0, MAX_CROSSLINK_LABEL_CHARS);
+  const terminators = Array.from(clamped.matchAll(/[.!?]+(?=\s|$)/g));
+  if (terminators.length >= MAX_CROSSLINK_LABEL_SENTENCES) {
+    const fifth = terminators[MAX_CROSSLINK_LABEL_SENTENCES - 1];
+    const cutoff = (fifth.index ?? 0) + fifth[0].length;
+    if (clamped.slice(cutoff).trim().length > 0) {
+      clamped = clamped.slice(0, cutoff);
+    }
+  }
+  return clamped;
+}
+
+export function wrapCrossLinkLabelLines(label: string, maxCharsPerLine = 42): string[] {
+  const trimmed = label.trim();
+  if (!trimmed) return [];
+  const paragraphs = trimmed.split(/\r?\n/);
+  const lines: string[] = [];
+
+  for (const para of paragraphs) {
+    const clean = para.trim();
+    if (!clean) continue;
+    const words = clean.split(/\s+/);
+    let current = "";
+    for (const word of words) {
+      if (!current) {
+        if (word.length <= maxCharsPerLine) {
+          current = word;
+        } else {
+          for (let i = 0; i < word.length; i += maxCharsPerLine) {
+            const chunk = word.slice(i, i + maxCharsPerLine);
+            if (i + maxCharsPerLine < word.length) {
+              lines.push(chunk);
+            } else {
+              current = chunk;
+            }
+          }
+        }
+      } else if (current.length + 1 + word.length <= maxCharsPerLine) {
+        current = `${current} ${word}`;
+      } else {
+        lines.push(current);
+        if (word.length <= maxCharsPerLine) {
+          current = word;
+        } else {
+          current = "";
+          for (let i = 0; i < word.length; i += maxCharsPerLine) {
+            const chunk = word.slice(i, i + maxCharsPerLine);
+            if (i + maxCharsPerLine < word.length) {
+              lines.push(chunk);
+            } else {
+              current = chunk;
+            }
+          }
+        }
+      }
+    }
+    if (current) lines.push(current);
+  }
+
+  return lines;
+}
+
+export interface CrossLinkPathResult {
+  path: string;
+  labelX: number;
+  labelY: number;
+  relocated: boolean;
+  forceLabelAbove: boolean;
+}
+
+function estimateLabelBox(label: string): { width: number; height: number } {
+  const lines = wrapCrossLinkLabelLines(label, 42);
+  if (lines.length === 0) return { width: 64, height: 22 };
+  const maxLen = Math.max(4, ...lines.map((l) => l.length));
+  return {
+    width: Math.min(340, Math.max(48, maxLen * 7.2 + 16)),
+    height: Math.max(20, lines.length * 16 + 8),
+  };
+}
+
+function overlapsRect(
+  cx: number,
+  cy: number,
+  halfW: number,
+  halfH: number,
+  pad: number,
+  node: LayoutNodeInfo
+): boolean {
+  return (
+    cx + halfW + pad > node.x &&
+    cx - halfW - pad < node.x + node.width &&
+    cy + halfH + pad > node.y &&
+    cy - halfH - pad < node.y + node.height
+  );
+}
+
 export function buildCrossLinkPath(
   from: LayoutNodeInfo,
-  to: LayoutNodeInfo
-): { path: string; labelX: number; labelY: number } {
+  to: LayoutNodeInfo,
+  options?: {
+    layouts?: Record<string, LayoutNodeInfo>;
+    label?: string;
+    layer?: CrossLinkLayer;
+  }
+): CrossLinkPathResult {
   const fx = from.x + from.width / 2;
   const fy = from.y + from.height / 2;
   const tx = to.x + to.width / 2;
@@ -374,10 +492,188 @@ export function buildCrossLinkPath(
   const cx = (fx + tx) / 2 - dy * 0.18;
   const cy = (fy + ty) / 2 + dx * 0.18 - 28;
 
+  const path = `M ${fx} ${fy} Q ${cx} ${cy} ${tx} ${ty}`;
+  const midX = 0.25 * fx + 0.5 * cx + 0.25 * tx;
+  const midY = 0.25 * fy + 0.5 * cy + 0.25 * ty;
+
+  const layer = options?.layer || "above";
+  const label = options?.label?.trim() || "";
+  const allNodes = options?.layouts ? Object.values(options.layouts) : [];
+
+  if (layer !== "behind" || !label || allNodes.length === 0) {
+    return {
+      path,
+      labelX: midX,
+      labelY: midY,
+      relocated: false,
+      forceLabelAbove: false,
+    };
+  }
+
+  const { width: labelW, height: labelH } = estimateLabelBox(label);
+  const halfW = labelW / 2;
+  const halfH = labelH / 2;
+  const pad = 6;
+
+  const isObscured = (x: number, y: number): boolean =>
+    allNodes.some((node) => overlapsRect(x, y, halfW, halfH, pad, node));
+
+  if (!isObscured(midX, midY)) {
+    return {
+      path,
+      labelX: midX,
+      labelY: midY,
+      relocated: false,
+      forceLabelAbove: false,
+    };
+  }
+
+  const evalCurve = (t: number) => {
+    const u = 1 - t;
+    return {
+      t,
+      x: u * u * fx + 2 * u * t * cx + t * t * tx,
+      y: u * u * fy + 2 * u * t * cy + t * t * ty,
+    };
+  };
+
+  const curveSamples = Array.from({ length: 29 }, (_, idx) => {
+    const t = 0.15 + (idx / 28) * 0.7;
+    return evalCurve(t);
+  });
+
+  const minCurveDist = (x: number, y: number): number => {
+    let best = Infinity;
+    for (const pt of curveSamples) {
+      const d = Math.hypot(x - pt.x, y - pt.y);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+
+  const corridorMinX = Math.min(from.x, to.x) - 32;
+  const corridorMaxX = Math.max(from.x + from.width, to.x + to.width) + 32;
+  const leftNode = from.x + from.width <= to.x ? from : to.x + to.width <= from.x ? to : null;
+  const rightNode = leftNode === from ? to : leftNode === to ? from : null;
+  const betweenMinX = leftNode ? leftNode.x + leftNode.width + pad : corridorMinX;
+  const betweenMaxX = rightNode ? rightNode.x - pad : corridorMaxX;
+  const hasBetweenSpan = leftNode !== null && betweenMaxX - betweenMinX >= labelW;
+
+  interface Candidate {
+    x: number;
+    y: number;
+    score: number;
+  }
+  const candidates: Candidate[] = [];
+
+  const evaluateHorizontalClearance = (x: number, y: number): number => {
+    let leftDist = x - corridorMinX;
+    let rightDist = corridorMaxX - x;
+    for (const node of allNodes) {
+      if (y + halfH + pad > node.y && y - halfH - pad < node.y + node.height) {
+        const nodeRight = node.x + node.width;
+        if (nodeRight <= x) {
+          leftDist = Math.min(leftDist, x - nodeRight);
+        }
+        if (node.x >= x) {
+          rightDist = Math.min(rightDist, node.x - x);
+        }
+      }
+    }
+    return Math.min(leftDist, rightDist);
+  };
+
+  const pushCandidate = (x: number, y: number, bonus = 0) => {
+    if (isObscured(x, y)) return;
+    const distToMid = Math.hypot(x - midX, y - midY);
+    const distToCurve = minCurveDist(x, y);
+    if (distToCurve > 85) return;
+    const hClearance = Math.max(0, evaluateHorizontalClearance(x, y));
+    // Lower score is better: stay close to the curve and midpoint while favoring horizontal clearance
+    const score = distToCurve * 2.4 + distToMid * 0.45 - Math.min(100, hClearance) * 0.55 - bonus;
+    candidates.push({ x, y, score });
+  };
+
+  // 1. Check unobstructed points directly along the curve
+  for (const pt of curveSamples) {
+    pushCandidate(pt.x, pt.y, 4);
+  }
+
+  // 2. Find middle positions of available horizontal gaps between nodes at curve row heights
+  const yRows = new Set<number>();
+  yRows.add(Math.round(midY));
+  for (const pt of curveSamples) {
+    yRows.add(Math.round(pt.y));
+  }
+
+  for (const rowY of yRows) {
+    const pushGapsInRange = (rangeMin: number, rangeMax: number, gapBonus: number) => {
+      const blockingIntervals: Array<[number, number]> = [];
+      for (const node of allNodes) {
+        if (rowY + halfH + pad > node.y && rowY - halfH - pad < node.y + node.height) {
+          const start = Math.max(rangeMin, node.x - pad);
+          const end = Math.min(rangeMax, node.x + node.width + pad);
+          if (end > start) {
+            blockingIntervals.push([start, end]);
+          }
+        }
+      }
+
+      blockingIntervals.sort((a, b) => a[0] - b[0]);
+      const merged: Array<[number, number]> = [];
+      for (const iv of blockingIntervals) {
+        if (merged.length === 0 || iv[0] > merged[merged.length - 1][1]) {
+          merged.push([iv[0], iv[1]]);
+        } else {
+          merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]);
+        }
+      }
+
+      let cursor = rangeMin;
+      const gaps: Array<[number, number]> = [];
+      for (const [bStart, bEnd] of merged) {
+        if (bStart > cursor) {
+          gaps.push([cursor, bStart]);
+        }
+        cursor = Math.max(cursor, bEnd);
+      }
+      if (cursor < rangeMax) {
+        gaps.push([cursor, rangeMax]);
+      }
+
+      for (const [gStart, gEnd] of gaps) {
+        if (gEnd - gStart >= labelW) {
+          const gapMidX = (gStart + gEnd) / 2;
+          pushCandidate(gapMidX, rowY, gapBonus);
+        }
+      }
+    };
+
+    if (hasBetweenSpan) {
+      pushGapsInRange(betweenMinX, betweenMaxX, 28);
+    }
+    pushGapsInRange(corridorMinX, corridorMaxX, 14);
+  }
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => a.score - b.score);
+    return {
+      path,
+      labelX: candidates[0].x,
+      labelY: candidates[0].y,
+      relocated: true,
+      forceLabelAbove: false,
+    };
+  }
+
+  // No collision-free horizontal space left anywhere in a dense/complex map:
+  // keep the connecting line behind nodes, and elevate the text label alone above nodes.
   return {
-    path: `M ${fx} ${fy} Q ${cx} ${cy} ${tx} ${ty}`,
-    labelX: 0.25 * fx + 0.5 * cx + 0.25 * tx,
-    labelY: 0.25 * fy + 0.5 * cy + 0.25 * ty,
+    path,
+    labelX: midX,
+    labelY: midY,
+    relocated: false,
+    forceLabelAbove: true,
   };
 }
 
