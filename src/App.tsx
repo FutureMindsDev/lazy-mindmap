@@ -710,7 +710,7 @@ export function App() {
         const cursorY = e.clientY - rect.top;
         const rawDelta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
         const clampedDelta = Math.max(-60, Math.min(60, rawDelta));
-        const factor = Math.exp(-clampedDelta * 0.0022);
+        const factor = Math.exp(-clampedDelta * 0.0033);
         setViewport((v) => {
           const nextScale = Math.min(2.6, Math.max(0.2, v.scale * factor));
           const ratio = nextScale / v.scale;
