@@ -59,6 +59,7 @@ import {
   addDetachedRootNode,
   addSiblingNode,
   adjustFontSize,
+  applyCollapseState,
   cloneDocument,
   collapseToLevel,
   createBlankMap,
@@ -67,14 +68,17 @@ import {
   detachNodeToRoot,
   duplicateNodes,
   expandAllNodes,
+  getMaxDepth,
+  getNodeMoveCapabilities,
   getSiblingIds,
   getSubtreeIds,
   insertParentNode,
   insertSubtreeBranches,
   makeId,
+  moveNodeRelative,
   pasteSubtreeNodes,
   removeAllPhotosFromNodes,
-  reorderSibling,
+  repositionNode,
   resetNodesColor,
   resizeNodesBatch,
   serializeClipboardSubtree,
@@ -95,11 +99,253 @@ interface ViewportTransform {
   scale: number;
 }
 
+interface DragDropHint {
+  draggedId: string;
+  targetId: string;
+  placement: "before" | "after" | "inside";
+  side?: "left" | "right";
+  indicator: {
+    kind: "line" | "box";
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label?: string;
+  };
+}
+
+function computeDragDropHint(
+  draggedId: string,
+  worldX: number,
+  worldY: number,
+  curDoc: MindMapDocument,
+  curLayouts: Record<string, LayoutNodeInfo>
+): DragDropHint | null {
+  const draggedNode = curDoc.nodes[draggedId];
+  const draggedLayout = curLayouts[draggedId];
+  if (!draggedNode || !draggedLayout || !draggedNode.parentId) return null;
+
+  const excluded = new Set(getSubtreeIds(curDoc, draggedId, true));
+  const candidates = Object.values(curLayouts).filter((l) => !excluded.has(l.id));
+
+  let bestCand: LayoutNodeInfo | null = null;
+  let bestDist = Infinity;
+
+  for (const cand of candidates) {
+    if (
+      worldX >= cand.x - 18 &&
+      worldX <= cand.x + cand.width + 18 &&
+      worldY >= cand.y - 18 &&
+      worldY <= cand.y + cand.height + 18
+    ) {
+      const cx = cand.x + cand.width / 2;
+      const cy = cand.y + cand.height / 2;
+      const dist = Math.hypot(worldX - cx, worldY - cy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestCand = cand;
+      }
+    }
+  }
+
+  if (!bestCand) {
+    for (const cand of candidates) {
+      if (cand.depth === 0) continue;
+      if (curDoc.layout !== "org-chart") {
+        if (worldX >= cand.x - 48 && worldX <= cand.x + cand.width + 48) {
+          const cy = cand.y + cand.height / 2;
+          const vDist = Math.abs(worldY - cy);
+          if (vDist <= cand.height / 2 + 56 && vDist < bestDist) {
+            bestDist = vDist;
+            bestCand = cand;
+          }
+        }
+      } else if (worldY >= cand.y - 48 && worldY <= cand.y + cand.height + 48) {
+        const cx = cand.x + cand.width / 2;
+        const hDist = Math.abs(worldX - cx);
+        if (hDist <= cand.width / 2 + 56 && hDist < bestDist) {
+          bestDist = hDist;
+          bestCand = cand;
+        }
+      }
+    }
+  }
+
+  if (bestCand) {
+    if (bestCand.depth === 0) {
+      const candCenterX = bestCand.x + bestCand.width / 2;
+      const side =
+        curDoc.layout === "org-chart"
+          ? undefined
+          : curDoc.layout === "tree-right"
+          ? "right"
+          : worldX < candCenterX
+          ? "left"
+          : "right";
+      const label =
+        side === "left" ? "Move to Left" : side === "right" ? "Move to Right" : "Attach here";
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "inside",
+        side,
+        indicator: {
+          kind: "box",
+          x: bestCand.x,
+          y: bestCand.y,
+          width: bestCand.width,
+          height: bestCand.height,
+          label,
+        },
+      };
+    }
+
+    if (curDoc.layout === "org-chart") {
+      const relX = (worldX - bestCand.x) / Math.max(1, bestCand.width);
+      if (relX < 0.34) {
+        return {
+          draggedId,
+          targetId: bestCand.id,
+          placement: "before",
+          indicator: {
+            kind: "line",
+            x: bestCand.x - 10,
+            y: bestCand.y - 4,
+            width: 4,
+            height: bestCand.height + 8,
+            label: "Move left",
+          },
+        };
+      }
+      if (relX > 0.66) {
+        return {
+          draggedId,
+          targetId: bestCand.id,
+          placement: "after",
+          indicator: {
+            kind: "line",
+            x: bestCand.x + bestCand.width + 6,
+            y: bestCand.y - 4,
+            width: 4,
+            height: bestCand.height + 8,
+            label: "Move right",
+          },
+        };
+      }
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "inside",
+        indicator: {
+          kind: "box",
+          x: bestCand.x,
+          y: bestCand.y,
+          width: bestCand.width,
+          height: bestCand.height,
+          label: "Make child",
+        },
+      };
+    }
+
+    const candSide = bestCand.side === "left" ? "left" : "right";
+    const relY = (worldY - bestCand.y) / Math.max(1, bestCand.height);
+    if (relY < 0.34) {
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "before",
+        side: candSide,
+        indicator: {
+          kind: "line",
+          x: bestCand.x,
+          y: bestCand.y - 10,
+          width: bestCand.width,
+          height: 4,
+          label: "Move above",
+        },
+      };
+    }
+    if (relY > 0.66) {
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "after",
+        side: candSide,
+        indicator: {
+          kind: "line",
+          x: bestCand.x,
+          y: bestCand.y + bestCand.height + 6,
+          width: bestCand.width,
+          height: 4,
+          label: "Move below",
+        },
+      };
+    }
+    return {
+      draggedId,
+      targetId: bestCand.id,
+      placement: "inside",
+      side: candSide,
+      indicator: {
+        kind: "box",
+        x: bestCand.x,
+        y: bestCand.y,
+        width: bestCand.width,
+        height: bestCand.height,
+        label: "Make child",
+      },
+    };
+  }
+
+  if (curDoc.layout !== "org-chart") {
+    const rootLayout = curLayouts[draggedLayout.rootId];
+    if (rootLayout) {
+      const rootCenterX = rootLayout.x + rootLayout.width / 2;
+      const currentSide = draggedLayout.side === "left" ? "left" : "right";
+      if (currentSide === "right" && worldX < rootCenterX - 18) {
+        return {
+          draggedId,
+          targetId: rootLayout.id,
+          placement: "inside",
+          side: "left",
+          indicator: {
+            kind: "box",
+            x: rootLayout.x,
+            y: rootLayout.y,
+            width: rootLayout.width,
+            height: rootLayout.height,
+            label: "Move to Left",
+          },
+        };
+      }
+      if (currentSide === "left" && worldX > rootCenterX + 18) {
+        return {
+          draggedId,
+          targetId: rootLayout.id,
+          placement: "inside",
+          side: "right",
+          indicator: {
+            kind: "box",
+            x: rootLayout.x,
+            y: rootLayout.y,
+            width: rootLayout.width,
+            height: rootLayout.height,
+            label: "Move to Right",
+          },
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 export function App() {
   const [doc, setDoc] = useState<MindMapDocument>(() => createInitialMap());
   const [maps, setMaps] = useState<MapSummary[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [syncStatus, setSyncStatus] = useState("Loading…");
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveErrorDismissed, setSaveErrorDismissed] = useState(false);
   const [autoSaveIntervalSec, setAutoSaveIntervalSec] = useState<number>(45);
@@ -131,6 +377,8 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [crossLinkSourceId, setCrossLinkSourceId] = useState<string | null>(null);
   const [selectedCrossLinkId, setSelectedCrossLinkId] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<{ nodeId: string; dx: number; dy: number } | null>(null);
+  const [dragDropHint, setDragDropHint] = useState<DragDropHint | null>(null);
 
   const [liveStatus, setLiveStatus] = useState("");
   const [toast, setToast] = useState<{ msg: string; actionLabel?: string; onAction?: () => void } | null>(null);
@@ -170,6 +418,16 @@ export function App() {
     () => computeMindMapLayout(doc, measuredSizes, isDark),
     [doc, measuredSizes, isDark]
   );
+  const layoutsRef = useRef(layouts);
+  layoutsRef.current = layouts;
+  const viewportStateRef = useRef(viewport);
+  viewportStateRef.current = viewport;
+
+  const maxDepth = useMemo(() => getMaxDepth(doc), [doc]);
+  const levelOptions = useMemo(
+    () => Array.from({ length: Math.max(1, maxDepth) }, (_, i) => i + 1),
+    [maxDepth]
+  );
 
   const commitDoc = useCallback((nextDoc: MindMapDocument, recordHistory = true) => {
     setDoc((prev) => {
@@ -181,6 +439,19 @@ export function App() {
       return nextDoc;
     });
   }, []);
+
+  const collapseMapToLevel = useCallback(
+    (level: number) => {
+      commitDoc(collapseToLevel(doc, level), false);
+      announce(`Collapsed map to level ${level}`);
+    },
+    [doc, commitDoc, announce]
+  );
+
+  const expandAll = useCallback(() => {
+    commitDoc(expandAllNodes(doc), false);
+    announce("Expanded all nodes");
+  }, [doc, commitDoc, announce]);
 
   const refreshMapList = useCallback(async (currentDoc: MindMapDocument) => {
     const { summaries } = await listMapsDual();
@@ -213,9 +484,9 @@ export function App() {
         const timeStr = new Date().toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
-          second: "2-digit",
         });
-        setSyncStatus(`Saved · ${timeStr}`);
+        setSyncStatus("Saved");
+        setLastSavedTime(timeStr);
         void refreshMapList(targetDoc);
         if (isManual) announce("Map saved");
       } else {
@@ -270,9 +541,9 @@ export function App() {
         const timeStr = new Date().toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
-          second: "2-digit",
         });
-        setSyncStatus(`Saved · ${timeStr}`);
+        setSyncStatus("Saved");
+        setLastSavedTime(timeStr);
       } else {
         setSaveState("error");
         setSaveError(initialSaveErr || "Server unreachable — working locally.");
@@ -618,7 +889,7 @@ export function App() {
       if (p.length === 0) return p;
       const previous = p[p.length - 1];
       setFuture((f) => [doc, ...f.slice(0, 79)]);
-      setDoc(previous);
+      setDoc(applyCollapseState(previous, doc));
       announce("Undo");
       return p.slice(0, -1);
     });
@@ -629,7 +900,7 @@ export function App() {
       if (f.length === 0) return f;
       const [nextDoc, ...rest] = f;
       setPast((p) => [...p, doc]);
-      setDoc(nextDoc);
+      setDoc(applyCollapseState(nextDoc, doc));
       announce("Redo");
       return rest;
     });
@@ -704,6 +975,31 @@ export function App() {
     announce("Added detached root node");
   }, [doc, hasSelection, layouts, primarySelectedId, commitDoc, announce]);
 
+  const handleMoveNode = useCallback(
+    (direction: "up" | "down" | "left" | "right") => {
+      if (!hasSelection) return;
+      const next = moveNodeRelative(doc, primarySelectedId, direction);
+      if (next !== doc) {
+        commitDoc(next);
+        const msg =
+          direction === "up"
+            ? "Moved node up"
+            : direction === "down"
+            ? "Moved node down"
+            : direction === "left"
+            ? "Moved node to left side"
+            : "Moved node to right side";
+        announce(msg);
+      }
+    },
+    [hasSelection, doc, primarySelectedId, commitDoc, announce]
+  );
+
+  const primaryMoveCapabilities = useMemo(() => {
+    if (!hasSelection || selectedIds.length !== 1) return undefined;
+    return getNodeMoveCapabilities(doc, primarySelectedId);
+  }, [hasSelection, selectedIds.length, doc, primarySelectedId]);
+
   const anyDialogOpen =
     shortcutsOpen || imageModalOpen || subtreeModalOpen || Boolean(lightboxImage);
 
@@ -735,20 +1031,12 @@ export function App() {
         announce("Detached node into independent root");
       }
     },
-    onReorderSibling: (delta) => {
-      commitDoc(reorderSibling(doc, primarySelectedId, delta));
-    },
+    onMoveNode: handleMoveNode,
     onToggleCollapse: () => {
-      commitDoc(toggleCollapseNode(doc, primarySelectedId));
+      commitDoc(toggleCollapseNode(doc, primarySelectedId), false);
     },
-    onCollapseToLevel: (level) => {
-      commitDoc(collapseToLevel(doc, level));
-      announce(`Collapsed map to level ${level}`);
-    },
-    onExpandAll: () => {
-      commitDoc(expandAllNodes(doc));
-      announce("Expanded all nodes");
-    },
+    onCollapseToLevel: collapseMapToLevel,
+    onExpandAll: expandAll,
     onFontSize: (mode) => {
       commitDoc(adjustFontSize(doc, selectedIds, mode));
     },
@@ -930,46 +1218,123 @@ export function App() {
     window.addEventListener("mouseup", onUp);
   };
 
-  // Drag root or detached root node freely
-  const handleDragRootStart = useCallback(
+  // Drag root nodes freely in 2D, or drag non-root nodes to reorder/flip sides/reparent
+  const handleDragNodeStart = useCallback(
     (nodeId: string, e: ReactMouseEvent) => {
       if (e.button !== 0 || crossLinkSourceId) return;
-      const node = doc.nodes[nodeId];
-      const layoutInfo = layouts[nodeId];
-      if (!node || !layoutInfo || node.parentId !== null) return;
+      const node = docRef.current.nodes[nodeId];
+      const layoutInfo = layoutsRef.current[nodeId];
+      if (!node || !layoutInfo) return;
 
       const startClientX = e.clientX;
       const startClientY = e.clientY;
-      const origCenterX = layoutInfo.x + layoutInfo.width / 2;
-      const origCenterY = layoutInfo.y + layoutInfo.height / 2;
+
+      if (node.parentId === null) {
+        const origCenterX = layoutInfo.x + layoutInfo.width / 2;
+        const origCenterY = layoutInfo.y + layoutInfo.height / 2;
+        let moved = false;
+
+        const onMove = (ev: MouseEvent) => {
+          const scale = viewportStateRef.current.scale;
+          const dx = (ev.clientX - startClientX) / scale;
+          const dy = (ev.clientY - startClientY) / scale;
+          if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+          if (!moved) return;
+
+          setDoc((prev) => {
+            const next = cloneDocument(prev);
+            if (next.nodes[nodeId]) {
+              next.nodes[nodeId].position = {
+                x: Math.round(origCenterX + dx),
+                y: Math.round(origCenterY + dy),
+              };
+            }
+            return next;
+          });
+        };
+
+        const onUp = () => {
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        return;
+      }
+
       let moved = false;
+      let cancelled = false;
+      let latestHint: DragDropHint | null = null;
+
+      const cleanup = () => {
+        setDragState(null);
+        setDragDropHint(null);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("keydown", onKeyDown, true);
+      };
+
+      const onKeyDown = (kev: KeyboardEvent) => {
+        if (kev.key === "Escape") {
+          kev.preventDefault();
+          kev.stopPropagation();
+          cancelled = true;
+          cleanup();
+          announce("Node move cancelled");
+        }
+      };
 
       const onMove = (ev: MouseEvent) => {
-        const dx = (ev.clientX - startClientX) / viewport.scale;
-        const dy = (ev.clientY - startClientY) / viewport.scale;
-        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+        if (cancelled) return;
+        const vp = viewportStateRef.current;
+        const dx = (ev.clientX - startClientX) / vp.scale;
+        const dy = (ev.clientY - startClientY) / vp.scale;
+        if (!moved && Math.hypot(dx, dy) > 6) {
+          moved = true;
+        }
         if (!moved) return;
 
-        setDoc((prev) => {
-          const next = cloneDocument(prev);
-          if (next.nodes[nodeId]) {
-            next.nodes[nodeId].position = {
-              x: Math.round(origCenterX + dx),
-              y: Math.round(origCenterY + dy),
-            };
-          }
-          return next;
-        });
+        setDragState({ nodeId, dx, dy });
+
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const worldX = (ev.clientX - rect.left - vp.x) / vp.scale;
+        const worldY = (ev.clientY - rect.top - vp.y) / vp.scale;
+        const hint = computeDragDropHint(
+          nodeId,
+          worldX,
+          worldY,
+          docRef.current,
+          layoutsRef.current
+        );
+        latestHint = hint;
+        setDragDropHint(hint);
       };
 
       const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+        const hintToApply = moved && !cancelled ? latestHint : null;
+        cleanup();
+        if (hintToApply) {
+          const curDoc = docRef.current;
+          const nextDoc = repositionNode(
+            curDoc,
+            hintToApply.draggedId,
+            hintToApply.targetId,
+            hintToApply.placement,
+            hintToApply.side
+          );
+          if (nextDoc !== curDoc) {
+            commitDoc(nextDoc);
+            announce(hintToApply.indicator.label || "Repositioned node");
+          }
+        }
       };
+
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
+      window.addEventListener("keydown", onKeyDown, true);
     },
-    [doc.nodes, layouts, viewport.scale, crossLinkSourceId]
+    [crossLinkSourceId, commitDoc, announce]
   );
 
   const searchMatches = useMemo(() => {
@@ -1167,9 +1532,11 @@ export function App() {
         colorMode={doc.colorMode || "colorful"}
         connectorStyle={doc.connectorStyle}
         horizontalGap={doc.horizontalGap ?? DEFAULT_HORIZONTAL_GAP}
+        backgroundPattern={doc.backgroundPattern || "dots"}
         isDark={isDark}
         saveState={saveState}
         syncStatus={syncStatus}
+        lastSavedTime={lastSavedTime}
         saveError={saveError}
         autoSaveIntervalSec={autoSaveIntervalSec}
         onSelectMap={async (id) => {
@@ -1234,6 +1601,10 @@ export function App() {
         onChangeHorizontalGap={(horizontalGap) =>
           commitDoc({ ...doc, horizontalGap, updatedAt: new Date().toISOString() })
         }
+        onChangeBackgroundPattern={(backgroundPattern) => {
+          commitDoc({ ...doc, backgroundPattern, updatedAt: new Date().toISOString() });
+          announce(`Background changed to ${backgroundPattern}`);
+        }}
         onChangeAutoSaveInterval={(sec) => {
           setAutoSaveIntervalSec(sec);
           announce(`Auto-save interval set to ${sec}s`);
@@ -1293,6 +1664,7 @@ export function App() {
           ref={viewportRef}
           className={[
             "mf-canvas-viewport",
+            `bg-${doc.backgroundPattern || "dots"}`,
             tool === "hand" ? "tool-hand" : "",
             isPanning ? "is-panning" : "",
             crossLinkSourceId ? "tool-crosslink" : "",
@@ -1344,6 +1716,12 @@ export function App() {
                   isSelected={selectedIds.includes(node.id)}
                   isEditing={editingId === node.id}
                   isCrossLinkSource={crossLinkSourceId === node.id}
+                  isDragging={dragState?.nodeId === node.id}
+                  dragOffset={
+                    dragState?.nodeId === node.id
+                      ? { dx: dragState.dx, dy: dragState.dy }
+                      : null
+                  }
                   onSelect={handleSelectNode}
                   onStartEdit={setEditingId}
                   onCommitEdit={(id, nextText) => {
@@ -1367,7 +1745,7 @@ export function App() {
                       })
                     );
                   }}
-                  onToggleCollapse={(id) => commitDoc(toggleCollapseNode(doc, id))}
+                  onToggleCollapse={(id) => commitDoc(toggleCollapseNode(doc, id), false)}
                   onAddChildQuick={(parentId) => {
                     const { doc: next, newId } = addChildNode(doc, parentId);
                     commitDoc(next);
@@ -1415,10 +1793,31 @@ export function App() {
                   }}
                   onSizeChange={handleSizeChange}
                   onAnnounce={announce}
-                  onDragNodeStart={handleDragRootStart}
+                  onDragNodeStart={handleDragNodeStart}
                 />
               );
             })}
+
+            {dragDropHint && (
+              <div
+                className={
+                  dragDropHint.indicator.kind === "line"
+                    ? "mf-drop-indicator-line"
+                    : "mf-drop-indicator-box"
+                }
+                style={{
+                  transform: `translate(${dragDropHint.indicator.x}px, ${dragDropHint.indicator.y}px)`,
+                  width: `${dragDropHint.indicator.width}px`,
+                  height: `${dragDropHint.indicator.height}px`,
+                }}
+              >
+                {dragDropHint.indicator.label && (
+                  <span className="mf-drop-indicator-badge">
+                    {dragDropHint.indicator.label}
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Front SVG layer: cross-link lines layered above all node cards */}
             <svg className="mf-svg-layer mf-svg-crosslinks">
@@ -1440,7 +1839,7 @@ export function App() {
             />
           )}
 
-          {!editingId && !anyDialogOpen && selectedIds.length > 0 && (
+          {!editingId && !anyDialogOpen && !dragState && selectedIds.length > 0 && (
             <FloatingNodeToolbar
               selectedNodes={selectedIds
                 .map((id) => doc.nodes[id])
@@ -1453,6 +1852,8 @@ export function App() {
               onAddChild={handleAddChildNode}
               onAddSibling={() => handleAddSiblingNode("below")}
               onInsertParent={handleInsertParentNode}
+              moveCapabilities={primaryMoveCapabilities}
+              onMoveNode={handleMoveNode}
               onSetColors={(colors) => commitDoc(setNodesColor(doc, selectedIds, colors))}
               onResetColors={() => {
                 commitDoc(resetNodesColor(doc, selectedIds));
@@ -1508,7 +1909,7 @@ export function App() {
                 setCrossLinkSourceId((prev) => (prev ? null : primarySelectedId))
               }
               onBatchCollapse={(collapsed) => {
-                commitDoc(setBatchCollapse(doc, selectedIds, collapsed));
+                commitDoc(setBatchCollapse(doc, selectedIds, collapsed), false);
                 announce(collapsed ? "Collapsed selected branches" : "Expanded selected branches");
               }}
               onDuplicateNodes={() => {
@@ -1759,22 +2160,39 @@ export function App() {
         <button type="button" className="mf-btn" title="Zoom to fit (Ctrl+1)" onClick={zoomToFit}>
           <Maximize2 size={14} aria-hidden="true" />
         </button>
-        <button
-          type="button"
-          className="mf-btn"
-          title="Collapse to level 1 (Alt+1)"
-          onClick={() => commitDoc(collapseToLevel(doc, 1))}
-        >
-          <Minimize2 size={14} aria-hidden="true" /> L1
-        </button>
-        <button
-          type="button"
-          className="mf-chip-btn"
-          title="Expand all (Alt+0 / Shift+F)"
-          onClick={() => commitDoc(expandAllNodes(doc))}
-        >
-          Expand All
-        </button>
+        <div className="mf-level-menu">
+          <button
+            type="button"
+            className="mf-btn"
+            aria-haspopup="menu"
+            title="Outline level (Alt+1..9)"
+            onClick={() => collapseMapToLevel(1)}
+          >
+            <Minimize2 size={14} aria-hidden="true" /> Expand Level
+          </button>
+          <div className="mf-level-menu-list" role="menu" aria-label="Collapse to level">
+            {levelOptions.map((lvl) => (
+              <button
+                key={lvl}
+                type="button"
+                role="menuitem"
+                className="mf-level-menu-item"
+                onClick={() => collapseMapToLevel(lvl)}
+              >
+                Level {lvl}
+                {lvl <= 9 ? <kbd>Alt+{lvl}</kbd> : null}
+              </button>
+            ))}
+            <button
+              type="button"
+              role="menuitem"
+              className="mf-level-menu-item"
+              onClick={expandAll}
+            >
+              Expand all <kbd>Alt+0</kbd>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Live region & Toast */}

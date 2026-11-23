@@ -18,6 +18,8 @@
   --border-dark: #334155;
   --dot-light: #cbd5e1;
   --dot-dark: #1e293b;
+  --grid-light: #e2e8f0;
+  --grid-dark: #172033;
   --accent-light: #2563eb;
   --accent-dark: #60a5fa;
 
@@ -28,6 +30,7 @@
   --text-muted: var(--text-muted-light);
   --border-color: var(--border-light);
   --dot-color: var(--dot-light);
+  --grid-line-color: var(--grid-light);
   --accent-color: var(--accent-light);
 
   @media (prefers-color-scheme: dark) {
@@ -38,6 +41,7 @@
     --text-muted: var(--text-muted-dark);
     --border-color: var(--border-dark);
     --dot-color: var(--dot-dark);
+    --grid-line-color: var(--grid-dark);
     --accent-color: var(--accent-dark);
   }
 
@@ -49,6 +53,7 @@
     --text-muted: light-dark(var(--text-muted-light), var(--text-muted-dark));
     --border-color: light-dark(var(--border-light), var(--border-dark));
     --dot-color: light-dark(var(--dot-light), var(--dot-dark));
+    --grid-line-color: light-dark(var(--grid-light), var(--grid-dark));
     --accent-color: light-dark(var(--accent-light), var(--accent-dark));
   }
 
@@ -61,6 +66,7 @@
     --text-muted: var(--text-muted-dark);
     --border-color: var(--border-dark);
     --dot-color: var(--dot-dark);
+    --grid-line-color: var(--grid-dark);
     --accent-color: var(--accent-dark);
   }
 
@@ -73,6 +79,7 @@
     --text-muted: var(--text-muted-light);
     --border-color: var(--border-light);
     --dot-color: var(--dot-light);
+    --grid-line-color: var(--grid-light);
     --accent-color: var(--accent-light);
   }
 
@@ -224,13 +231,19 @@ dialog.mf-dialog::backdrop {
 }
 
 .mf-map-select {
-  background: var(--bg-elevated);
+  background-color: var(--bg-elevated);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 5px 10px;
+  padding: 5px 30px 5px 10px;
   font-size: 0.85rem;
   max-width: 210px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
 }
 
 .mf-toolbar {
@@ -309,14 +322,24 @@ dialog.mf-dialog::backdrop {
   }
 }
 
+button svg[class*="lucide-chevron"] {
+  margin-right: 4px;
+}
+
 .mf-select {
-  background: var(--bg-elevated);
+  background-color: var(--bg-elevated);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: 7px;
-  padding: 4px 8px;
+  padding: 4px 30px 4px 8px;
   font-size: 0.8rem;
   min-block-size: 30px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
 }
 
 .mf-sync-pill {
@@ -332,6 +355,15 @@ dialog.mf-dialog::backdrop {
   border: 1px solid var(--border-color);
   white-space: nowrap;
   cursor: pointer;
+}
+
+.mf-sync-time {
+  display: none;
+}
+
+.mf-sync-pill:hover .mf-sync-time,
+.mf-sync-pill:focus-visible .mf-sync-time {
+  display: inline;
 }
 
 .mf-sync-pill.is-saved {
@@ -569,6 +601,12 @@ dialog.mf-dialog::backdrop {
   gap: 8px;
 }
 
+.mf-map-switcher {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
+}
+
 .mf-menu-label {
   font-size: 0.78rem;
   font-weight: 600;
@@ -588,6 +626,66 @@ dialog.mf-dialog::backdrop {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+
+.mf-preview-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mf-chip-btn.mf-preview-chip-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.mf-preview-chip-label {
+  font-size: 0.71rem;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.mf-option-preview-svg {
+  display: block;
+  width: 68px;
+  height: auto;
+  overflow: visible;
+}
+
+.mf-option-preview-svg .mf-svg-edge {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.72;
+}
+
+.mf-option-preview-svg .mf-svg-root {
+  fill: var(--accent-color);
+  opacity: 0.92;
+}
+
+.mf-option-preview-svg .mf-svg-node {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  opacity: 0.85;
+}
+
+.mf-chip-btn.mf-preview-chip-btn.is-active .mf-option-preview-svg .mf-svg-root {
+  fill: #ffffff;
+}
+
+.mf-chip-btn.mf-preview-chip-btn.is-active .mf-option-preview-svg .mf-svg-edge,
+.mf-chip-btn.mf-preview-chip-btn.is-active .mf-option-preview-svg .mf-svg-node {
+  opacity: 0.95;
 }
 
 .mf-menu-value-badge {
@@ -629,8 +727,39 @@ dialog.mf-dialog::backdrop {
   background-color: var(--bg-canvas);
   background-image: radial-gradient(circle, var(--dot-color) 1px, transparent 1px);
   background-size: 24px 24px;
+  -webkit-user-select: none;
   user-select: none;
   touch-action: none;
+}
+
+.mf-canvas-viewport.bg-dots {
+  background-image: radial-gradient(circle, var(--dot-color) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.mf-canvas-viewport.bg-grid-sm {
+  background-image:
+    linear-gradient(to right, var(--grid-line-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line-color) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.mf-canvas-viewport.bg-grid-md {
+  background-image:
+    linear-gradient(to right, var(--grid-line-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line-color) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.mf-canvas-viewport.bg-grid-lg {
+  background-image:
+    linear-gradient(to right, var(--grid-line-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line-color) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.mf-canvas-viewport.bg-plain {
+  background-image: none;
 }
 
 .mf-canvas-viewport.tool-hand {
@@ -710,6 +839,7 @@ dialog.mf-dialog::backdrop {
   padding: 9px 13px;
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   transition: box-shadow 0.14s ease, border-color 0.14s ease;
 }
@@ -747,10 +877,56 @@ dialog.mf-dialog::backdrop {
 .mf-node.is-editing {
   z-index: 25;
   cursor: text;
+  -webkit-user-select: text;
   user-select: text;
   min-width: 260px;
   max-width: 520px;
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.24);
+}
+
+.mf-node.is-dragging {
+  z-index: 40;
+  opacity: 0.78;
+  cursor: grabbing;
+  pointer-events: none;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
+}
+
+.mf-drop-indicator-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 999px;
+  background: var(--accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  pointer-events: none;
+  z-index: 45;
+}
+
+.mf-drop-indicator-box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 14px;
+  border: 2.5px dashed var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+  pointer-events: none;
+  z-index: 45;
+}
+
+.mf-drop-indicator-badge {
+  position: absolute;
+  left: 50%;
+  top: -24px;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
 }
 
 .mf-node.is-drop-target {
@@ -1236,6 +1412,70 @@ dialog.mf-dialog::backdrop {
   z-index: 25;
 }
 
+.mf-level-menu {
+  position: relative;
+}
+
+.mf-level-menu::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 10px;
+}
+
+.mf-level-menu-list {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 150px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.mf-level-menu:hover .mf-level-menu-list,
+.mf-level-menu:focus-within .mf-level-menu-list {
+  display: flex;
+}
+
+.mf-level-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mf-level-menu-item:hover,
+.mf-level-menu-item:focus-visible {
+  background: var(--bg-elevated);
+  outline: none;
+}
+
+.mf-level-menu-item kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
 .mf-toast {
   position: fixed;
   bottom: 16px;
@@ -1305,6 +1545,28 @@ dialog.mf-dialog::backdrop {
 
 .mf-swatch:hover {
   transform: scale(1.06);
+}
+
+.mf-swatch-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 2px dashed var(--border-color);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.mf-swatch-picker input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
 }
 
 /* Node Resize Handles & Quick-Add Button */
@@ -1474,9 +1736,14 @@ dialog.mf-dialog::backdrop {
   cursor: pointer;
 }
 
-.mf-ctx-btn:hover,
+.mf-ctx-btn:hover:not([aria-disabled="true"]),
 .mf-ctx-btn[aria-expanded="true"] {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.mf-ctx-btn[aria-disabled="true"] {
+  opacity: 0.36;
+  cursor: not-allowed;
 }
 
 .mf-ctx-btn[aria-pressed="true"] {
@@ -1555,6 +1822,13 @@ dialog.mf-dialog::backdrop {
   margin-bottom: 7px;
   display: flex;
   align-items: center;
+}
+
+.mf-popover-reset {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .mf-ctx-popover-sub {

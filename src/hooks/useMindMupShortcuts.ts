@@ -17,7 +17,7 @@ interface ShortcutHandlers {
   onDeleteSelected: () => void;
   onAddDetachedRoot: () => void;
   onDetachSelected: () => void;
-  onReorderSibling: (delta: -1 | 1) => void;
+  onMoveNode: (direction: "up" | "down" | "left" | "right") => void;
   onToggleCollapse: () => void;
   onCollapseToLevel: (level: number) => void;
   onExpandAll: () => void;
@@ -227,15 +227,25 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
-      // Reorder siblings: Ctrl+Up / Ctrl+Down
+      // Move node position relative to siblings / parent: Ctrl+Up/Down/Left/Right
       if (mod && !shift && !alt && key === "ArrowUp") {
         e.preventDefault();
-        handlers.onReorderSibling(-1);
+        handlers.onMoveNode("up");
         return;
       }
       if (mod && !shift && !alt && key === "ArrowDown") {
         e.preventDefault();
-        handlers.onReorderSibling(1);
+        handlers.onMoveNode("down");
+        return;
+      }
+      if (mod && !shift && !alt && key === "ArrowLeft") {
+        e.preventDefault();
+        handlers.onMoveNode("left");
+        return;
+      }
+      if (mod && !shift && !alt && key === "ArrowRight") {
+        e.preventDefault();
+        handlers.onMoveNode("right");
         return;
       }
 

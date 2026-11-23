@@ -66,6 +66,8 @@ export const NODE_COLOR_SWATCHES = [
   "#ede9fe",
 ];
 
+export const NODE_PALETTE_SWATCHES = NODE_COLOR_SWATCHES.filter((c) => c !== "#ede9fe");
+
 export const FONT_SIZE_PRESETS = [
   { label: "Small", size: 12 },
   { label: "Medium", size: 14 },

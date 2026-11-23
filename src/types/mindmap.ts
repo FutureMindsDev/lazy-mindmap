@@ -20,6 +20,8 @@ export type CrossLinkStrokeStyle = "dashed" | "dotted" | "solid";
 
 export type CrossLinkLayer = "above" | "behind";
 
+export type CanvasBackground = "dots" | "grid-sm" | "grid-md" | "grid-lg" | "plain";
+
 export interface NodeImage {
   id: string;
   url: string;
@@ -88,6 +90,7 @@ export interface MindMapDocument {
   colorMode?: ColorMode;
   connectorStyle: ConnectorStyle;
   horizontalGap?: number;
+  backgroundPattern?: CanvasBackground;
   createdAt: string;
   updatedAt: string;
 }

@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  CanvasBackground,
   CanvasTool,
   ColorMode,
   ConnectorStyle,
@@ -50,9 +51,11 @@ interface TopToolbarProps {
   colorMode: ColorMode;
   connectorStyle: ConnectorStyle;
   horizontalGap: number;
+  backgroundPattern: CanvasBackground;
   isDark: boolean;
   saveState: SaveState;
   syncStatus: string;
+  lastSavedTime: string | null;
   saveError: string | null;
   autoSaveIntervalSec: number;
   onSelectMap: (id: string) => void;
@@ -67,6 +70,7 @@ interface TopToolbarProps {
   onChangeColorMode: (mode: ColorMode) => void;
   onChangeConnector: (style: ConnectorStyle) => void;
   onChangeHorizontalGap: (gap: number) => void;
+  onChangeBackgroundPattern: (bg: CanvasBackground) => void;
   onChangeAutoSaveInterval: (seconds: number) => void;
   onToggleDarkLight: () => void;
   onOpenSubtreePaste: () => void;
@@ -83,6 +87,77 @@ const EDGE_DISTANCE_PRESETS = [
   { label: "MindMup", value: 140 },
   { label: "Wide", value: 200 },
 ];
+
+const BACKGROUND_OPTIONS: { id: CanvasBackground; label: string }[] = [
+  { id: "dots", label: "Dots" },
+  { id: "grid-sm", label: "Grid Small" },
+  { id: "grid-md", label: "Grid Medium" },
+  { id: "grid-lg", label: "Grid Large" },
+  { id: "plain", label: "Plain" },
+];
+
+function renderLayoutPreviewSvg(mode: LayoutMode) {
+  if (mode === "tree-right") {
+    return (
+      <svg className="mf-option-preview-svg" viewBox="0 0 72 38" aria-hidden="true">
+        <path d="M22 19 C33 19 35 7 47 7" className="mf-svg-edge" />
+        <path d="M22 19 L47 19" className="mf-svg-edge" />
+        <path d="M22 19 C33 19 35 31 47 31" className="mf-svg-edge" />
+        <rect x="4" y="14" width="18" height="10" rx="3" className="mf-svg-root" />
+        <rect x="47" y="3" width="21" height="8" rx="2.5" className="mf-svg-node" />
+        <rect x="47" y="15" width="21" height="8" rx="2.5" className="mf-svg-node" />
+        <rect x="47" y="27" width="21" height="8" rx="2.5" className="mf-svg-node" />
+      </svg>
+    );
+  }
+  if (mode === "org-chart") {
+    return (
+      <svg className="mf-option-preview-svg" viewBox="0 0 72 38" aria-hidden="true">
+        <path
+          d="M36 13 L36 19 M13 19 L59 19 M13 19 L13 25 M36 19 L36 25 M59 19 L59 25"
+          className="mf-svg-edge"
+        />
+        <rect x="26" y="3" width="20" height="10" rx="3" className="mf-svg-root" />
+        <rect x="4" y="25" width="18" height="9" rx="2.5" className="mf-svg-node" />
+        <rect x="27" y="25" width="18" height="9" rx="2.5" className="mf-svg-node" />
+        <rect x="50" y="25" width="18" height="9" rx="2.5" className="mf-svg-node" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="mf-option-preview-svg" viewBox="0 0 72 38" aria-hidden="true">
+      <path d="M27 19 C21 19 20 9 14 9" className="mf-svg-edge" />
+      <path d="M27 19 C21 19 20 29 14 29" className="mf-svg-edge" />
+      <path d="M45 19 C51 19 52 9 58 9" className="mf-svg-edge" />
+      <path d="M45 19 C51 19 52 29 58 29" className="mf-svg-edge" />
+      <rect x="27" y="14" width="18" height="10" rx="3" className="mf-svg-root" />
+      <rect x="3" y="5" width="11" height="8" rx="2.5" className="mf-svg-node" />
+      <rect x="3" y="25" width="11" height="8" rx="2.5" className="mf-svg-node" />
+      <rect x="58" y="5" width="11" height="8" rx="2.5" className="mf-svg-node" />
+      <rect x="58" y="25" width="11" height="8" rx="2.5" className="mf-svg-node" />
+    </svg>
+  );
+}
+
+function renderConnectorPreviewSvg(style: ConnectorStyle) {
+  let paths: [string, string];
+  if (style === "orthogonal") {
+    paths = ["M18 17 L34 17 L34 8 L50 8", "M18 17 L34 17 L34 26 L50 26"];
+  } else if (style === "straight") {
+    paths = ["M18 17 L50 8", "M18 17 L50 26"];
+  } else {
+    paths = ["M18 17 C33 17 34 8 50 8", "M18 17 C33 17 34 26 50 26"];
+  }
+  return (
+    <svg className="mf-option-preview-svg" viewBox="0 0 72 34" aria-hidden="true">
+      <path d={paths[0]} className="mf-svg-edge" />
+      <path d={paths[1]} className="mf-svg-edge" />
+      <rect x="4" y="12" width="14" height="10" rx="3" className="mf-svg-root" />
+      <rect x="50" y="4" width="18" height="8" rx="2.5" className="mf-svg-node" />
+      <rect x="50" y="22" width="18" height="8" rx="2.5" className="mf-svg-node" />
+    </svg>
+  );
+}
 
 const EXPORT_FORMATS = [
   { id: "json", label: "JSON (.json)" },
@@ -111,9 +186,11 @@ export function TopToolbar({
   colorMode,
   connectorStyle,
   horizontalGap,
+  backgroundPattern,
   isDark,
   saveState,
   syncStatus,
+  lastSavedTime,
   saveError,
   autoSaveIntervalSec,
   onSelectMap,
@@ -128,6 +205,7 @@ export function TopToolbar({
   onChangeColorMode,
   onChangeConnector,
   onChangeHorizontalGap,
+  onChangeBackgroundPattern,
   onChangeAutoSaveInterval,
   onToggleDarkLight,
   onOpenSubtreePaste,
@@ -148,7 +226,7 @@ export function TopToolbar({
 
   useEffect(() => {
     if (!menuOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
@@ -160,10 +238,10 @@ export function TopToolbar({
         menuTriggerRef.current?.focus();
       }
     };
-    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown, true);
     return () => {
-      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown, true);
     };
   }, [menuOpen]);
@@ -192,19 +270,6 @@ export function TopToolbar({
         </span>
         <span>MindForge</span>
       </div>
-
-      <select
-        className="mf-map-select"
-        aria-label="Switch mind map"
-        value={activeMapId}
-        onChange={(e) => onSelectMap(e.target.value)}
-      >
-        {maps.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.title} ({m.nodeCount})
-          </option>
-        ))}
-      </select>
 
       <div
         ref={toolbarRef}
@@ -306,11 +371,16 @@ export function TopToolbar({
               ? `${saveError} — Click to retry save (Ctrl+S)`
               : `Auto-saves every ${autoSaveIntervalSec}s · Click to save now (Ctrl+S)`
           }
-          aria-label={`Save status: ${syncStatus}. Click to save now.`}
+          aria-label={`Save status: ${syncStatus}${
+            saveState === "saved" && lastSavedTime ? ` at ${lastSavedTime}` : ""
+          }. Click to save now.`}
           onClick={onSaveNow}
         >
           {renderSaveIcon()}
           <span>{syncStatus}</span>
+          {saveState === "saved" && lastSavedTime && (
+            <span className="mf-sync-time">· {lastSavedTime}</span>
+          )}
         </button>
 
         <button
@@ -378,6 +448,27 @@ export function TopToolbar({
               {showSection("file") && (
                 <section className="mf-menu-section" aria-label="File and auto-save">
                   <h3 className="mf-menu-section-title">File &amp; Auto-Save</h3>
+
+                  <div className="mf-menu-row">
+                    <label htmlFor="mf-map-switcher" className="mf-menu-label">
+                      Current map
+                    </label>
+                    <select
+                      id="mf-map-switcher"
+                      className="mf-select mf-map-switcher"
+                      value={activeMapId}
+                      onChange={(e) => {
+                        onSelectMap(e.target.value);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      {maps.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.title} ({m.nodeCount})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   <div className="mf-menu-btn-grid">
                     <button
@@ -470,7 +561,7 @@ export function TopToolbar({
                   <h3 className="mf-menu-section-title">Layout &amp; Edge Spacing</h3>
 
                   <div className="mf-menu-sublabel">Map Structure</div>
-                  <div className="mf-menu-chip-grid">
+                  <div className="mf-preview-chip-grid">
                     {(
                       [
                         { id: "mindmap", label: "Radial Mind Map" },
@@ -481,16 +572,18 @@ export function TopToolbar({
                       <button
                         key={mode.id}
                         type="button"
-                        className={`mf-chip-btn ${layout === mode.id ? "is-active" : ""}`}
+                        aria-pressed={layout === mode.id}
+                        className={`mf-chip-btn mf-preview-chip-btn ${layout === mode.id ? "is-active" : ""}`}
                         onClick={() => onChangeLayout(mode.id)}
                       >
-                        {mode.label}
+                        <span className="mf-preview-chip-label">{mode.label}</span>
+                        {renderLayoutPreviewSvg(mode.id)}
                       </button>
                     ))}
                   </div>
 
                   <div className="mf-menu-sublabel">Connector Style</div>
-                  <div className="mf-menu-chip-grid">
+                  <div className="mf-preview-chip-grid">
                     {(
                       [
                         { id: "bezier", label: "Curved" },
@@ -501,10 +594,27 @@ export function TopToolbar({
                       <button
                         key={conn.id}
                         type="button"
-                        className={`mf-chip-btn ${connectorStyle === conn.id ? "is-active" : ""}`}
+                        aria-pressed={connectorStyle === conn.id}
+                        className={`mf-chip-btn mf-preview-chip-btn ${connectorStyle === conn.id ? "is-active" : ""}`}
                         onClick={() => onChangeConnector(conn.id)}
                       >
-                        {conn.label}
+                        <span className="mf-preview-chip-label">{conn.label}</span>
+                        {renderConnectorPreviewSvg(conn.id)}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mf-menu-sublabel">Background</div>
+                  <div className="mf-menu-chip-grid">
+                    {BACKGROUND_OPTIONS.map((bg) => (
+                      <button
+                        key={bg.id}
+                        type="button"
+                        aria-pressed={backgroundPattern === bg.id}
+                        className={`mf-chip-btn ${backgroundPattern === bg.id ? "is-active" : ""}`}
+                        onClick={() => onChangeBackgroundPattern(bg.id)}
+                      >
+                        {bg.label}
                       </button>
                     ))}
                   </div>

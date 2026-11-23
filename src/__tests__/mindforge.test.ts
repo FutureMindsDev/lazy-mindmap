@@ -6,13 +6,19 @@ import {
   addChildNode,
   addDetachedRootNode,
   addSiblingNode,
+  applyCollapseState,
   collapseToLevel,
+  createBlankMap,
   createInitialMap,
   detachNodeToRoot,
   expandAllNodes,
+  getMaxDepth,
+  getNodeMoveCapabilities,
   insertParentNode,
+  moveNodeRelative,
   removeAllPhotosFromNodes,
   reorderSibling,
+  repositionNode,
   resetNodesColor,
   resizeNodesBatch,
   setBatchCollapse,
@@ -271,5 +277,109 @@ describe("Layout Engine and Tree Operations", () => {
 
     doc = removeAllPhotosFromNodes(doc, ["node-media"]);
     expect(doc.nodes["node-media"].images).toEqual([]);
+  });
+
+  it("computes getMaxDepth regardless of collapsed state and preserves collapse state across undo/redo snapshots", () => {
+    const blank = createBlankMap();
+    expect(getMaxDepth(blank)).toBe(0);
+
+    const initial = createInitialMap();
+    expect(getMaxDepth(initial)).toBeGreaterThanOrEqual(2);
+
+    // Collapsing branches does not reduce getMaxDepth
+    const collapsedLevel1 = collapseToLevel(initial, 1);
+    expect(getMaxDepth(collapsedLevel1)).toBe(getMaxDepth(initial));
+
+    // When nothing differs (treating undefined as false), applyCollapseState returns exact same reference
+    const expanded = expandAllNodes(initial);
+    expect(applyCollapseState(initial, expanded)).toBe(initial);
+
+    // Copies collapsed state for shared IDs while leaving target-only nodes untouched
+    const targetWithExtra = addChildNode(initial, "node-math", "Target only child");
+    targetWithExtra.doc.nodes[targetWithExtra.newId].collapsed = true;
+    targetWithExtra.doc.nodes["node-code"].collapsed = true;
+    const sourceWithChanges = toggleCollapseNode(
+      collapseToLevel(initial, 1),
+      "node-code"
+    );
+    const merged = applyCollapseState(targetWithExtra.doc, sourceWithChanges);
+    expect(merged).not.toBe(targetWithExtra.doc);
+    expect(merged.updatedAt).toBe(targetWithExtra.doc.updatedAt);
+    expect(merged.nodes["node-math"].collapsed).toBe(true);
+    expect(merged.nodes["node-code"].collapsed).toBe(false);
+    expect(merged.nodes[targetWithExtra.newId].collapsed).toBe(true);
+  });
+
+  it("reorders same-side siblings up/down and moves branches left/right relative to parent", () => {
+    const initial = createInitialMap();
+    const beforeLayout = computeMindMapLayout(initial);
+    // In starter map: node-math & node-shortcuts are on right; node-code & node-media are on left
+    expect(beforeLayout["node-math"].side).toBe("right");
+    expect(beforeLayout["node-shortcuts"].side).toBe("right");
+    expect(beforeLayout["node-shortcuts"].y).toBeGreaterThan(beforeLayout["node-math"].y);
+
+    // Moving node-shortcuts up swaps it above node-math on the right side
+    const movedUp = moveNodeRelative(initial, "node-shortcuts", "up");
+    const upLayout = computeMindMapLayout(movedUp);
+    expect(upLayout["node-shortcuts"].y).toBeLessThan(upLayout["node-math"].y);
+    expect(upLayout["node-code"].side).toBe("left");
+    expect(upLayout["node-media"].side).toBe("left");
+
+    // Capabilities reflect top/bottom/side boundaries
+    const shortcutsCaps = getNodeMoveCapabilities(movedUp, "node-shortcuts");
+    expect(shortcutsCaps).toEqual({
+      canMoveUp: false,
+      canMoveDown: true,
+      canMoveLeft: true,
+      canMoveRight: false,
+    });
+
+    // Moving node-math from right to left flips both it and its children to left side
+    const movedLeft = moveNodeRelative(movedUp, "node-math", "left");
+    const leftLayout = computeMindMapLayout(movedLeft);
+    expect(leftLayout["node-math"].side).toBe("left");
+    expect(leftLayout["node-math"].x).toBeLessThan(leftLayout[movedLeft.rootIds[0]].x);
+    expect(leftLayout["node-math-chatgpt"].side).toBe("left");
+
+    // Moving node-math back to right restores it to right side
+    const movedBackRight = moveNodeRelative(movedLeft, "node-math", "right");
+    expect(computeMindMapLayout(movedBackRight)["node-math"].side).toBe("right");
+
+    // In tree-right mode, moving one child left switches layout to mindmap while preserving other right children
+    const treeDoc = { ...initial, layout: "tree-right" as const };
+    const treeMovedLeft = moveNodeRelative(treeDoc, "node-code", "left");
+    expect(treeMovedLeft.layout).toBe("mindmap");
+    const treeMovedLayout = computeMindMapLayout(treeMovedLeft);
+    expect(treeMovedLayout["node-code"].side).toBe("left");
+    expect(treeMovedLayout["node-math"].side).toBe("right");
+
+    // In org-chart mode, left/right moves siblings horizontally
+    const orgDoc = { ...initial, layout: "org-chart" as const };
+    const orgBefore = computeMindMapLayout(orgDoc);
+    expect(orgBefore["node-code"].x).toBeGreaterThan(orgBefore["node-math"].x);
+    const orgSwapped = moveNodeRelative(orgDoc, "node-code", "left");
+    const orgAfter = computeMindMapLayout(orgSwapped);
+    expect(orgAfter["node-code"].x).toBeLessThan(orgAfter["node-math"].x);
+  });
+
+  it("repositions nodes via drag-and-drop before/after siblings, across sides, and inside new parents", () => {
+    const initial = createInitialMap();
+
+    // Drag node-math (right) before node-code (left) -> moves to left side above node-code
+    const movedToLeftTop = repositionNode(initial, "node-math", "node-code", "before", "left");
+    const leftTopLayout = computeMindMapLayout(movedToLeftTop);
+    expect(leftTopLayout["node-math"].side).toBe("left");
+    expect(leftTopLayout["node-math"].y).toBeLessThan(leftTopLayout["node-code"].y);
+    expect(leftTopLayout["node-math-chatgpt"].side).toBe("left");
+
+    // Drag node-math-chatgpt inside node-shortcuts -> reparents under node-shortcuts on right side
+    const reparented = repositionNode(movedToLeftTop, "node-math-chatgpt", "node-shortcuts", "inside");
+    expect(reparented.nodes["node-math-chatgpt"].parentId).toBe("node-shortcuts");
+    expect(reparented.nodes["node-math"].childrenIds).not.toContain("node-math-chatgpt");
+    expect(computeMindMapLayout(reparented)["node-math-chatgpt"].side).toBe("right");
+
+    // Dropping a parent inside its own descendant is ignored
+    const invalidDrop = repositionNode(initial, "node-math", "node-math-chatgpt", "inside");
+    expect(invalidDrop).toBe(initial);
   });
 });

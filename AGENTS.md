@@ -20,17 +20,17 @@ This file provides essential project context, user UX/UI preferences, architectu
 
 ### 2.1 Minimalist Top Navbar & Top-Right Hamburger Menu
 - **Keep the top navbar uncluttered.** Only retain:
-  - Brand (`MindForge`) and Map Switcher `<select>`
+  - Brand (`MindForge`)
   - **+ Floating** detached root node button (`Ctrl+D`)
   - **Undo / Redo** (`U`/`R` or `Ctrl+Z`/`Ctrl+Y`) and **Select (`V`) / Hand (`H`)** tools
   - **LLM** subtree paste button (`Ctrl+Shift+V`) and **Search** (`Ctrl+F`)
-  - **Save Status Pill** (clickable to trigger save now / retry)
+  - **Save Status Pill** (shows `Saved` cleanly, revealing the `HH:MM` timestamp without seconds only on hover/focus; clickable to trigger save now / retry)
   - **Top-Right Hamburger `Menu`** button (`☰ Menu`)
 - **Do NOT add node-level buttons** (`Child`, `Sibling`, `Parent`, `Photo`, `Notes`) to the top navbar or inside the Hamburger Menu's **Tools & Help** section. Those live inside the contextual floating node toolbar and keyboard shortcuts (`Tab`, `Enter`, `Shift+Tab`, `I`, `A`).
 - **Categorized Top-Right Hamburger Panel (`.mf-hamburger-panel`):**
   - Anchored to `.mf-topbar-right` (`position: absolute; top: calc(100% + 10px); right: 0;`) so it never collides with the top save-failure banner.
   - Organized into category tabs: **All**, **File**, **Layout**, **Theme**, **Tools**.
-  - **File & Auto-Save:** New Map, Save Now, Import (`.json`, `.mup`, `.md`), Delete Map, Auto-save interval selector (`15s`, `45s`, `90s`, `180s`), Export formats (`.json`, `.md`, `.mup`, `.mm`, `.svg`, `.png`).
+  - **File & Auto-Save:** Map Switcher (`Current map` select), New Map, Save Now, Import (`.json`, `.mup`, `.md`), Delete Map, Auto-save interval selector (`15s`, `45s`, `90s`, `180s`), Export formats (`.json`, `.md`, `.mup`, `.mm`, `.svg`, `.png`).
   - **Layout & Edge Spacing:** Layout mode (`Radial Mind Map`, `Right Tree`, `Org Chart`), Connector style (`Curved`, `Elbow`, `Straight`), and **Edge Horizontal Distance** (`36px`–`260px` slider + `Compact 48px`, `Standard 80px`, `MindMup 140px`, `Wide 200px` presets).
   - **Theme & Appearance:** Node & Edge Color Mode (`Contrast`, `Colorful`, `Custom`), Color Palette (`Ocean`, `Midnight`, `Pastel`, `Solarized`, `Emerald`), Light/Dark toggle (`Alt+D`).
   - **Tools & Help:** `LLM Subtree Paste` and `Shortcuts` (`Ctrl+/`).
@@ -39,7 +39,7 @@ This file provides essential project context, user UX/UI preferences, architectu
 - **Floating Node Toolbar (`src/components/FloatingNodeToolbar.tsx`):**
   - Appears when 1+ nodes are selected.
   - **Node Color button:** Shows ONLY the rounded color square (`.mf-color-dot-solo`) — **do NOT** add a paint-bucket or fill SVG icon next to it.
-  - **Node + Edge Color button:** Sits directly beside the node color square, showing a thick colored line (`.mf-edge-color-line`) in the node's current edge/branch color. Changing colors automatically switches `doc.colorMode` to `"custom"`.
+  - **Node + Edge Color button:** Sits directly beside the node color square, showing a thick colored line (`.mf-edge-color-line`) in the node's current edge/branch color. Its color panel only sets border + edge color (never node fill). Both color panels place a custom color picker tile (`Pipette` icon, `.mf-swatch-picker`) as the first swatch in the grid and an `Auto` reset button in the popover header. Changing colors automatically switches `doc.colorMode` to `"custom"`.
   - Includes quick node creation (`Child`, `Sibling`, `Parent`), typography/alignment, shape/width presets, `Photo`, `Tasks`, `Notes`, `Stickers`, `Cross-link`, `Fold/Unfold`, `Duplicate`, and `Delete`.
 - **Floating Cross-Link Toolbar (`src/components/FloatingCrossLinkToolbar.tsx`):**
   - Cross-links are **only** selectable on single-click directly on the line or label (`selectedCrossLinkId`). Multi-select, marquee drag, and `Ctrl+A` (Select All) must NEVER select cross-links.
@@ -63,9 +63,17 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
   - `.mf-svg-crosslinks` (`z-index: 32`): Cross-links set to `layer: "above"` (default) and `.mf-crosslink-label` text sit above all nodes with a surface-color stroke halo.
 - **Horizontal Edge Spacing:** `doc.horizontalGap` defaults to `80` in `src/utils/layoutEngine.ts` (min `36`, max `260`).
 - **Zoom Gesture Sensitivity:** `Ctrl+Scroll` / trackpad pinch zoom in `src/App.tsx` must remain smoothly damped (`Math.exp(-clampedDelta * 0.0022)` with clamped delta), never fixed large step jumps per event.
+- **Undo / Redo & Bottom HUD Level Expansion:**
+  - Node expand/collapse actions are excluded from undo/redo history, and undo/redo preserve the current collapse state across shared node IDs.
+  - The bottom-left HUD provides an `Expand Level` hover/focus menu above the button listing `Level 1`..`Level N` plus `Expand all` (with no separate `Expand All` button).
 - **Auto-Save & Failure Banner:**
   - Default periodic auto-save interval is **45 seconds** (configurable to `15s`, `45s`, `90s`, `180s`), paired with a **4.5-second** edit debounce and `visibilitychange` safeguard.
   - Reflects live state (`saved`, `saving`, `unsaved`, `error`) in the top status pill and displays a top-of-screen `role="alert"` notice banner (`.mf-save-error-banner`) with **Retry Now** and **Dismiss** buttons whenever saving fails.
+
+### 2.5 Chevron / Dropdown Spacing
+- Any button or `<select>` with a chevron icon must keep right-side breathing room so the chevron never touches the right border:
+  - Native selects (`.mf-select`, `.mf-map-select`) use `appearance: none` with a custom SVG chevron at `background-position: right 10px center` and `padding-right: 30px`.
+  - Lucide Chevron icons inside buttons get `margin-right: 4px`.
 
 ---
 
