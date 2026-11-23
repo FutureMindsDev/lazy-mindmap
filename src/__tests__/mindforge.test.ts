@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { extractMarkdownFromHtml, renderRichNodeContent } from "../utils/llmMathNormalizer";
+import {
+  callLlmProvider,
+  findRelatedNodes,
+  LlmApiError,
+  parseAndApplyLlmResponse,
+} from "../utils/llmMindMapAgent";
 import { parseMarkdownToSubtree } from "../utils/markdownToSubtree";
 import { computeMindMapLayout } from "../utils/layoutEngine";
 import {
@@ -381,5 +387,147 @@ describe("Layout Engine and Tree Operations", () => {
     // Dropping a parent inside its own descendant is ignored
     const invalidDrop = repositionNode(initial, "node-math", "node-math-chatgpt", "inside");
     expect(invalidDrop).toBe(initial);
+  });
+});
+
+describe("LLM Mind Map Assistant Agent", () => {
+  it("identifies related existing nodes from user prompt and falls back to selection", () => {
+    const doc = createInitialMap();
+
+    const mathMatches = findRelatedNodes(doc, "Update the Universal LLM Math equations", ["node-code"]);
+    expect(mathMatches[0].id).toBe("node-math");
+
+    const fallbackMatches = findRelatedNodes(doc, "add three fresh brainstorming ideas", ["node-shortcuts"]);
+    expect(fallbackMatches[0].id).toBe("node-shortcuts");
+  });
+
+  it("modifies existing nodes, creates child/root nodes, attaches all file types, and reports affected nodes", () => {
+    const doc = createInitialMap();
+    const uploadedFiles = [
+      {
+        id: "f-pdf",
+        name: "spec.pdf",
+        url: "/uploads/spec.pdf",
+        mimeType: "application/pdf",
+        size: 12000,
+      },
+      {
+        id: "f-zip",
+        name: "bundle.zip",
+        url: "/uploads/bundle.zip",
+        mimeType: "application/zip",
+        size: 48000,
+      },
+      {
+        id: "f-img",
+        name: "diagram.png",
+        url: "/uploads/diagram.png",
+        mimeType: "image/png",
+        size: 9500,
+      },
+    ];
+
+    const llmReply = `\`\`\`json
+{
+  "explanation": "Updated **Universal LLM Math** with Euler's identity, added a branch under **Code, Diagrams & Tables**, and created a new root.",
+  "operations": [
+    {
+      "type": "modify_node",
+      "nodeId": "node-math",
+      "appendText": "Euler: $e^{i\\\\pi} + 1 = 0$",
+      "newNotes": "Derived from Taylor series",
+      "attachFiles": true
+    },
+    {
+      "type": "create_child_nodes",
+      "parentId": "node-code",
+      "branches": [
+        {
+          "text": "API Reference",
+          "children": [{ "text": "POST /api/llm/chat" }]
+        }
+      ]
+    },
+    {
+      "type": "create_root_node",
+      "text": "Deployment Checklist"
+    }
+  ]
+}
+\`\`\``;
+
+    const applied = parseAndApplyLlmResponse(doc, llmReply, doc.rootIds[0], uploadedFiles);
+    expect(applied.doc.nodes["node-math"].text).toContain("Euler:");
+    expect(applied.doc.nodes["node-math"].notes).toBe("Derived from Taylor series");
+    expect(applied.doc.nodes["node-math"].attachments).toHaveLength(2);
+    expect(applied.doc.nodes["node-math"].attachments?.map((a) => a.name)).toEqual([
+      "spec.pdf",
+      "bundle.zip",
+    ]);
+    expect(applied.doc.nodes["node-math"].images).toHaveLength(1);
+    expect(applied.doc.nodes["node-math"].images?.[0].name).toBe("diagram.png");
+
+    const codeChildren = applied.doc.nodes["node-code"].childrenIds;
+    const apiRefId = codeChildren.find((id) => applied.doc.nodes[id]?.text === "API Reference");
+    expect(apiRefId).toBeDefined();
+    expect(applied.doc.nodes[apiRefId!].childrenIds).toHaveLength(1);
+
+    expect(applied.doc.rootIds.length).toBe(2);
+    expect(applied.affectedNodes.some((n) => n.nodeId === "node-math" && n.action === "modified")).toBe(
+      true
+    );
+    expect(
+      applied.affectedNodes.some((n) => n.nodeId === "node-code" && n.action === "created_under")
+    ).toBe(true);
+    expect(applied.affectedNodes.some((n) => n.action === "created_root")).toBe(true);
+  });
+
+  it("falls back to Markdown subtree insertion and reports created nodes when LLM returns plain Markdown", () => {
+    const doc = createInitialMap();
+    const mdReply = `# Research Plan
+- Literature Review
+- Prototype`;
+    const applied = parseAndApplyLlmResponse(doc, mdReply, "node-code", []);
+    expect(applied.doc.nodes["node-code"].childrenIds.length).toBeGreaterThan(
+      doc.nodes["node-code"].childrenIds.length
+    );
+    expect(applied.affectedNodes.some((n) => n.nodeId === "node-code" && n.action === "created_under")).toBe(
+      true
+    );
+    expect(applied.affectedNodes.some((n) => n.action === "created_node")).toBe(true);
+  });
+
+  it("rejects missing API key and surfaces exact API error messages", async () => {
+    await expect(
+      callLlmProvider({
+        config: { provider: "openai", apiKey: "   ", model: "gpt-4o-mini" },
+        systemPrompt: "sys",
+        messages: [],
+      })
+    ).rejects.toThrow(/API key/i);
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "Incorrect API key provided: sk-bad" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await callLlmProvider({
+        config: { provider: "openai", apiKey: "sk-bad", model: "gpt-4o-mini" },
+        systemPrompt: "sys",
+        messages: [
+          { id: "m1", role: "user", content: "Hello", createdAt: new Date().toISOString() },
+        ],
+      });
+      expect.unreachable("Expected callLlmProvider to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(LlmApiError);
+      expect((err as LlmApiError).message).toBe("Incorrect API key provided: sk-bad");
+      expect((err as LlmApiError).status).toBe(401);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

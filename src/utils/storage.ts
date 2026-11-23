@@ -266,8 +266,8 @@ export async function uploadFileDual(file: File): Promise<{
   } catch {
     return {
       url: dataUrl,
-      name: file.name || "pasted-image",
-      mimeType: file.type || "image/png",
+      name: file.name || "pasted-file",
+      mimeType: file.type || "application/octet-stream",
       size: file.size,
       storedOnServer: false,
     };

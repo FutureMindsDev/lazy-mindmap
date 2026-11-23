@@ -57,7 +57,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
         ["U or Ctrl/Cmd + Z", "Undo"],
         ["R / Ctrl+Y / Ctrl+Shift+Z", "Redo"],
         ["Ctrl/Cmd + C / X / V", "Copy / Cut / Smart-Paste node or photo/LLM"],
-        ["Ctrl/Cmd + Shift + V", "Parse LLM Markdown into Subtree"],
+        ["Ctrl/Cmd + Shift + V", "Open AI Assistant Chat (or MD Subtree)"],
         ["Alt + D / Alt + M", "Toggle Light-Dark / Cycle Theme"],
         ["Ctrl/Cmd + F / Ctrl/Cmd + S", "Search nodes / Save map"],
       ],

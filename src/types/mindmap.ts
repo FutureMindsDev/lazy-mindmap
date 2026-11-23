@@ -113,3 +113,38 @@ export interface LayoutNodeInfo {
   side: "center" | "left" | "right" | "down";
   rootId: string;
 }
+
+export type LlmProviderId = "openai" | "gemini" | "anthropic" | "custom";
+
+export interface LlmConfig {
+  provider: LlmProviderId;
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+}
+
+export interface LlmChatFile {
+  id: string;
+  name: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  textContent?: string;
+  dataUrl?: string;
+}
+
+export interface LlmNodeChangeRecord {
+  nodeId: string;
+  nodeLabel: string;
+  action: "modified" | "created_under" | "created_node" | "created_root";
+}
+
+export interface LlmChatMessage {
+  id: string;
+  role: "user" | "assistant" | "error";
+  content: string;
+  createdAt: string;
+  files?: LlmChatFile[];
+  affectedNodes?: LlmNodeChangeRecord[];
+  rawError?: string;
+}
