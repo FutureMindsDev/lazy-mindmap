@@ -52,8 +52,14 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
     const onKeyDown = (e: KeyboardEvent) => {
       if (handlers.editingId || handlers.anyDialogOpen) return;
 
-      const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const activeTag = activeEl?.tagName;
+      if (
+        activeTag === "INPUT" ||
+        activeTag === "TEXTAREA" ||
+        activeTag === "SELECT" ||
+        activeEl?.closest?.(".mf-llm-drawer")
+      ) {
         return;
       }
 

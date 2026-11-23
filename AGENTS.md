@@ -23,7 +23,7 @@ This file provides essential project context, user UX/UI preferences, architectu
   - Brand (`MindForge`)
   - **+ Floating** detached root node button (`Ctrl+D`)
   - **Undo / Redo** (`U`/`R` or `Ctrl+Z`/`Ctrl+Y`) and **Select (`V`) / Hand (`H`)** tools
-  - **LLM** subtree paste button (`Ctrl+Shift+V`) and **Search** (`Ctrl+F`)
+  - **Search** (`Ctrl+F`) — while the **LLM Assistant** circular trigger button lives at the **bottom-right** corner, sliding out a right-hand AI chatbox with chat history, API key settings, universal file uploads, and modified/created node tracking (`Ctrl+Shift+V`)
   - **Save Status Pill** (shows `Saved` cleanly, revealing the `HH:MM` timestamp without seconds only on hover/focus; clickable to trigger save now / retry)
   - **Top-Right Hamburger `Menu`** button (`☰ Menu`)
 - **Do NOT add node-level buttons** (`Child`, `Sibling`, `Parent`, `Photo`, `Notes`) to the top navbar or inside the Hamburger Menu's **Tools & Help** section. Those live inside the contextual floating node toolbar and keyboard shortcuts (`Tab`, `Enter`, `Shift+Tab`, `I`, `A`).
@@ -33,7 +33,7 @@ This file provides essential project context, user UX/UI preferences, architectu
   - **File & Auto-Save:** Map Switcher (`Current map` select), New Map, Save Now, Import (`.json`, `.mup`, `.md`), Delete Map, Auto-save interval selector (`15s`, `45s`, `90s`, `180s`), Export formats (`.json`, `.md`, `.mup`, `.mm`, `.svg`, `.png`).
   - **Layout & Edge Spacing:** Layout mode (`Radial Mind Map`, `Right Tree`, `Org Chart`), Connector style (`Curved`, `Elbow`, `Straight`), and **Edge Horizontal Distance** (`36px`–`260px` slider + `Compact 48px`, `Standard 80px`, `MindMup 140px`, `Wide 200px` presets).
   - **Theme & Appearance:** Node & Edge Color Mode (`Contrast`, `Colorful`, `Custom`), Color Palette (`Ocean`, `Midnight`, `Pastel`, `Solarized`, `Emerald`), Light/Dark toggle (`Alt+D`).
-  - **Tools & Help:** `LLM Subtree Paste` and `Shortcuts` (`Ctrl+/`).
+  - **Tools & Help:** `AI Assistant Chat` and `Shortcuts` (`Ctrl+/`).
 
 ### 2.2 Contextual Floating Toolbars
 - **Floating Node Toolbar (`src/components/FloatingNodeToolbar.tsx`):**
@@ -88,14 +88,16 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
 | `src/components/FloatingCrossLinkToolbar.tsx` | Contextual floating bar for a single selected cross-link |
 | `src/components/MindMapNodeCard.tsx` | Rich node card rendering, inline Markdown editor, resize handles, photo actions |
 | `src/components/NodeSideDrawer.tsx` | `A` shortcut side inspector for extended notes and file attachments |
+| `src/components/LlmAssistantDrawer.tsx` | Bottom-right circular FAB + sliding right AI chatbox with history, API key settings, and universal file uploads |
 | `src/components/Modals.tsx` | Shortcuts cheat sheet, Image picker, LLM Subtree paste modal, Lightbox |
 | `src/utils/layoutEngine.ts` | Radial, right-tree, and org-chart positioning + connector/cross-link path math |
 | `src/utils/llmMathNormalizer.ts` | Universal LLM KaTeX/Markdown/code/Mermaid/task-list HTML renderer and clipboard extractor |
+| `src/utils/llmMindMapAgent.ts` | LLM prompt/context builder, related node matcher, JSON/Markdown operation applier, and API client |
 | `src/utils/treeOps.ts` | Pure immutable document/tree mutation helpers |
 | `src/utils/storage.ts` | Dual persistence (`IndexedDB`/`localStorage` + `/api/maps` & `/api/uploads`) |
 | `src/utils/themes.ts` | Theme palettes, color swatches, font presets, contrast foreground helper |
 | `src/utils/exporters.ts` | Export/import for JSON, Markdown, MindMup `.mup`, FreeMind `.mm`, SVG, PNG |
-| `server/api.mjs` | Backend REST middleware for `/api/maps`, `/api/uploads`, `/api/health` |
+| `server/api.mjs` | Backend REST middleware for `/api/maps`, `/api/uploads`, `/api/llm/chat`, `/api/health` |
 | `src/__tests__/mindforge.test.ts` | Vitest unit test suite |
 
 ---

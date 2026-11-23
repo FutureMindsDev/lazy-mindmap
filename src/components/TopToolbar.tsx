@@ -73,7 +73,7 @@ interface TopToolbarProps {
   onChangeBackgroundPattern: (bg: CanvasBackground) => void;
   onChangeAutoSaveInterval: (seconds: number) => void;
   onToggleDarkLight: () => void;
-  onOpenSubtreePaste: () => void;
+  onOpenLlmChat: () => void;
   onOpenSearch: () => void;
   onSaveNow: () => void;
   onExportAction: (fmt: string) => void;
@@ -208,7 +208,7 @@ export function TopToolbar({
   onChangeBackgroundPattern,
   onChangeAutoSaveInterval,
   onToggleDarkLight,
-  onOpenSubtreePaste,
+  onOpenLlmChat,
   onOpenSearch,
   onSaveNow,
   onExportAction,
@@ -338,17 +338,7 @@ export function TopToolbar({
 
         <span role="separator" aria-orientation="vertical" className="mf-toolbar-sep" />
 
-        <div role="group" aria-label="LLM and search" className="mf-toolbar-group">
-          <button
-            type="button"
-            className="mf-btn"
-            aria-label="Paste LLM Markdown as subtree (Ctrl+Shift+V)"
-            title="Paste LLM Markdown as Subtree (Ctrl+Shift+V)"
-            onClick={onOpenSubtreePaste}
-          >
-            <Sparkles size={15} aria-hidden="true" />
-            <span>LLM</span>
-          </button>
+        <div role="group" aria-label="Search" className="mf-toolbar-group">
           <button
             type="button"
             className="mf-btn"
@@ -727,11 +717,11 @@ export function TopToolbar({
                       className="mf-menu-item-btn"
                       onClick={() => {
                         setMenuOpen(false);
-                        onOpenSubtreePaste();
+                        onOpenLlmChat();
                       }}
                     >
                       <Sparkles size={14} aria-hidden="true" />
-                      <span>LLM Subtree Paste</span>
+                      <span>AI Assistant Chat</span>
                     </button>
                     <button
                       type="button"

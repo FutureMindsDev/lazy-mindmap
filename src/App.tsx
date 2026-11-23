@@ -9,6 +9,7 @@ import {
 import { AlertTriangle, Crosshair, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
 import { FloatingCrossLinkToolbar } from "./components/FloatingCrossLinkToolbar";
 import { FloatingNodeToolbar } from "./components/FloatingNodeToolbar";
+import { LlmAssistantDrawer } from "./components/LlmAssistantDrawer";
 import { ImageLightboxModal, ImagePickerModal, ShortcutsModal, SubtreePasteModal } from "./components/Modals";
 import { MindMapNodeCard } from "./components/MindMapNodeCard";
 import { NodeSideDrawer } from "./components/NodeSideDrawer";
@@ -371,6 +372,7 @@ export function App() {
   const [subtreePrefill, setSubtreePrefill] = useState("");
   const [lightboxImage, setLightboxImage] = useState<NodeImage | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [llmChatOpen, setLlmChatOpen] = useState(false);
   const [stylePopoverOpen, setStylePopoverOpen] = useState(false);
   const [stickerPopoverOpen, setStickerPopoverOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -664,15 +666,16 @@ export function App() {
   }, [layouts]);
 
   const centerOnNode = useCallback(
-    (nodeId: string) => {
+    (nodeId: string, rightOverlayWidth = 0) => {
       const el = viewportRef.current;
       const info = layouts[nodeId];
       if (!el || !info) return;
       const cx = info.x + info.width / 2;
       const cy = info.y + info.height / 2;
+      const usableWidth = Math.max(220, el.clientWidth - rightOverlayWidth);
       setViewport((v) => ({
         ...v,
-        x: el.clientWidth / 2 - cx * v.scale,
+        x: usableWidth / 2 - cx * v.scale,
         y: el.clientHeight / 2 - cy * v.scale,
       }));
     },
@@ -774,8 +777,15 @@ export function App() {
   useEffect(() => {
     const onPaste = async (e: ClipboardEvent) => {
       if (editingId || shortcutsOpen || imageModalOpen || subtreeModalOpen) return;
-      const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (activeTag === "INPUT" || activeTag === "TEXTAREA") return;
+      const activeEl = document.activeElement as HTMLElement | null;
+      const activeTag = activeEl?.tagName;
+      if (
+        activeTag === "INPUT" ||
+        activeTag === "TEXTAREA" ||
+        activeEl?.closest?.(".mf-llm-drawer")
+      ) {
+        return;
+      }
       if (!e.clipboardData) return;
       if (!hasSelection) {
         announce("Select a node first before pasting");
@@ -1094,7 +1104,7 @@ export function App() {
     onCopy: handleCopy,
     onCut: handleCut,
     onTriggerPasteAction: (asSubtree) => {
-      if (asSubtree) handleTriggerSubtreeModal();
+      if (asSubtree) setLlmChatOpen((o) => !o);
     },
     onSaveNow: () => {
       void performSave(doc, true);
@@ -1613,7 +1623,7 @@ export function App() {
           const target = toggleDarkLight();
           announce(`Switched to ${target} theme`);
         }}
-        onOpenSubtreePaste={handleTriggerSubtreeModal}
+        onOpenLlmChat={() => setLlmChatOpen(true)}
         onOpenSearch={() => {
           setSearchOpen(true);
           requestAnimationFrame(() => searchInputRef.current?.focus());
@@ -1978,6 +1988,29 @@ export function App() {
             onOpenImagePicker={() => setImageModalOpen(true)}
           />
         )}
+
+        <LlmAssistantDrawer
+          open={llmChatOpen}
+          doc={doc}
+          selectedIds={selectedIds}
+          primarySelectedId={primarySelectedId}
+          onToggleOpen={() => setLlmChatOpen((o) => !o)}
+          onClose={() => setLlmChatOpen(false)}
+          onApplyDocChange={(nextDoc, focusNodeId) => {
+            commitDoc(nextDoc);
+            if (focusNodeId && nextDoc.nodes[focusNodeId]) {
+              setSelectedIds([focusNodeId]);
+            }
+          }}
+          onFocusNode={(nodeId) => {
+            if (!doc.nodes[nodeId]) return;
+            setSelectedIds([nodeId]);
+            const panelW = llmChatOpen ? Math.min(420, containerRect.width * 0.94) : 0;
+            centerOnNode(nodeId, panelW);
+          }}
+          onOpenClassicMarkdownPaste={handleTriggerSubtreeModal}
+          onAnnounce={announce}
+        />
       </div>
 
       {/* Floating Style Popover (Shift+Space) */}
