@@ -28,6 +28,8 @@ interface MindMapNodeCardProps {
   isSelected: boolean;
   isEditing: boolean;
   isCrossLinkSource: boolean;
+  isDragging?: boolean;
+  dragOffset?: { dx: number; dy: number } | null;
   onSelect: (id: string, additive: boolean) => void;
   onStartEdit: (id: string) => void;
   onCommitEdit: (id: string, nextText: string) => void;
@@ -67,6 +69,8 @@ export function MindMapNodeCard({
   isSelected,
   isEditing,
   isCrossLinkSource,
+  isDragging = false,
+  dragOffset = null,
   onSelect,
   onStartEdit,
   onCommitEdit,
@@ -141,8 +145,10 @@ export function MindMapNodeCard({
   const textAlign = node.style?.align || (isRoot ? "center" : "left");
 
   const useCustomColors = colorMode === "custom";
+  const tx = layout.x + (dragOffset?.dx ?? 0);
+  const ty = layout.y + (dragOffset?.dy ?? 0);
   const customStyle: React.CSSProperties = {
-    transform: `translate(${layout.x}px, ${layout.y}px)`,
+    transform: `translate(${tx}px, ${ty}px)`,
     fontSize: `${fontSize}px`,
     textAlign,
     "--node-border": useCustomColors
@@ -518,6 +524,7 @@ export function MindMapNodeCard({
         isRoot ? "is-root" : "",
         isSelected ? "is-selected" : "",
         isEditing ? "is-editing" : "",
+        isDragging ? "is-dragging" : "",
         isDropTarget ? "is-drop-target" : "",
         isCrossLinkSource ? "is-crosslink-source" : "",
       ]
@@ -531,7 +538,15 @@ export function MindMapNodeCard({
         }
         e.stopPropagation();
         onSelect(node.id, e.shiftKey || e.metaKey || e.ctrlKey);
-        if (isRoot && onDragNodeStart) {
+        const targetEl = e.target as HTMLElement | null;
+        if (
+          e.button === 0 &&
+          !e.shiftKey &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          onDragNodeStart &&
+          !targetEl?.closest("button, input, a, .mf-img-resize-handle")
+        ) {
           onDragNodeStart(node.id, e);
         }
       }}

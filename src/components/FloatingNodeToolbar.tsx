@@ -4,6 +4,10 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Bold,
   CheckSquare,
   CopyPlus,
@@ -17,6 +21,7 @@ import {
   Italic,
   Maximize2,
   Paperclip,
+  Pipette,
   RotateCcw,
   Shapes,
   Smile,
@@ -32,7 +37,7 @@ import type {
   NodeImage,
   NodeShape,
 } from "../types/mindmap";
-import { FONT_SIZE_PRESETS, getContrastTextColor, NODE_COLOR_SWATCHES } from "../utils/themes";
+import { FONT_SIZE_PRESETS, getContrastTextColor, NODE_PALETTE_SWATCHES } from "../utils/themes";
 
 type ActivePanel = "color" | "edge-color" | "font" | "shape" | "photo" | "tasks" | null;
 
@@ -46,6 +51,13 @@ interface FloatingNodeToolbarProps {
   onAddChild: () => void;
   onAddSibling: () => void;
   onInsertParent: () => void;
+  moveCapabilities?: {
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+    canMoveLeft: boolean;
+    canMoveRight: boolean;
+  };
+  onMoveNode: (direction: "up" | "down" | "left" | "right") => void;
   onSetColors: (colors: { color?: string; borderColor?: string; edgeColor?: string; textColor?: string }) => void;
   onResetColors: () => void;
   onSetFontSize: (size: number | "reset") => void;
@@ -78,6 +90,8 @@ export function FloatingNodeToolbar({
   onAddChild,
   onAddSibling,
   onInsertParent,
+  moveCapabilities,
+  onMoveNode,
   onSetColors,
   onResetColors,
   onSetFontSize,
@@ -100,7 +114,6 @@ export function FloatingNodeToolbar({
   onDeleteNodes,
 }: FloatingNodeToolbarProps) {
   const [panel, setPanel] = useState<ActivePanel>(null);
-  const [fillNodeWithEdge, setFillNodeWithEdge] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   useToolbarFocusGroup(toolbarRef);
@@ -111,7 +124,6 @@ export function FloatingNodeToolbar({
   const currentFill = primary?.style?.color || anchorLayout?.branchColor || "#2563eb";
   const currentBorder = primary?.style?.borderColor || anchorLayout?.branchColor || "#2563eb";
   const currentEdge = primary?.style?.edgeColor || anchorLayout?.branchColor || "#2563eb";
-  const currentText = primary?.style?.textColor || getContrastTextColor(currentFill);
   const currentFont = primary?.style?.fontSize ?? (primary?.parentId === null ? 16 : 14);
   const currentShape = primary?.style?.shape || "rounded";
 
@@ -127,7 +139,7 @@ export function FloatingNodeToolbar({
   // Close open sub-panel on Escape or outside click
   useEffect(() => {
     if (!panel) return;
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       if (barRef.current && !barRef.current.contains(e.target as Node)) {
         setPanel(null);
       }
@@ -135,10 +147,10 @@ export function FloatingNodeToolbar({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setPanel(null);
     };
-    window.addEventListener("mousedown", onDown);
+    window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey);
     };
   }, [panel]);
@@ -233,6 +245,53 @@ export function FloatingNodeToolbar({
                 <GitFork size={14} aria-hidden="true" />
               </button>
             </div>
+            {primary.parentId !== null && moveCapabilities && (
+              <>
+                <span role="separator" aria-orientation="vertical" className="mf-ctx-sep" />
+                <div role="group" aria-label="Move node position" className="mf-toolbar-group">
+                  <button
+                    type="button"
+                    className="mf-ctx-btn"
+                    aria-label="Move node up among siblings (Ctrl+Up)"
+                    title="Move node up (Ctrl+Up)"
+                    aria-disabled={!moveCapabilities.canMoveUp ? "true" : undefined}
+                    onClick={() => moveCapabilities.canMoveUp && onMoveNode("up")}
+                  >
+                    <ArrowUp size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="mf-ctx-btn"
+                    aria-label="Move node down among siblings (Ctrl+Down)"
+                    title="Move node down (Ctrl+Down)"
+                    aria-disabled={!moveCapabilities.canMoveDown ? "true" : undefined}
+                    onClick={() => moveCapabilities.canMoveDown && onMoveNode("down")}
+                  >
+                    <ArrowDown size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="mf-ctx-btn"
+                    aria-label="Move node left of parent (Ctrl+Left)"
+                    title="Move left (Ctrl+Left)"
+                    aria-disabled={!moveCapabilities.canMoveLeft ? "true" : undefined}
+                    onClick={() => moveCapabilities.canMoveLeft && onMoveNode("left")}
+                  >
+                    <ArrowLeft size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="mf-ctx-btn"
+                    aria-label="Move node right of parent (Ctrl+Right)"
+                    title="Move right (Ctrl+Right)"
+                    aria-disabled={!moveCapabilities.canMoveRight ? "true" : undefined}
+                    onClick={() => moveCapabilities.canMoveRight && onMoveNode("right")}
+                  >
+                    <ArrowRight size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              </>
+            )}
             <span role="separator" aria-orientation="vertical" className="mf-ctx-sep" />
           </>
         )}
@@ -444,11 +503,33 @@ export function FloatingNodeToolbar({
       {panel === "color" && (
         <div className="mf-ctx-popover">
           <div className="mf-ctx-popover-title">
-            {isMulti ? `Color for ${selectedNodes.length} Selected Nodes` : "Node Colors"}
+            <span>{isMulti ? `Color for ${selectedNodes.length} Selected Nodes` : "Node Colors"}</span>
+            <button
+              type="button"
+              className="mf-chip-btn mf-popover-reset"
+              title="Reset to theme branch color"
+              onClick={onResetColors}
+            >
+              <RotateCcw size={12} aria-hidden="true" /> Auto
+            </button>
           </div>
 
           <div className="mf-swatch-grid">
-            {NODE_COLOR_SWATCHES.map((swatch) => (
+            <label className="mf-swatch mf-swatch-picker" title="Custom color">
+              <Pipette size={14} aria-hidden="true" />
+              <input
+                type="color"
+                aria-label="Custom fill color"
+                value={currentFill}
+                onChange={(e) =>
+                  onSetColors({
+                    color: e.target.value,
+                    textColor: getContrastTextColor(e.target.value),
+                  })
+                }
+              />
+            </label>
+            {NODE_PALETTE_SWATCHES.map((swatch) => (
               <button
                 key={swatch}
                 type="button"
@@ -465,121 +546,55 @@ export function FloatingNodeToolbar({
               />
             ))}
           </div>
-
-          <div className="mf-color-inputs-row">
-            <label>
-              <span>Fill</span>
-              <input
-                type="color"
-                value={currentFill}
-                onChange={(e) =>
-                  onSetColors({
-                    color: e.target.value,
-                    textColor: getContrastTextColor(e.target.value),
-                  })
-                }
-              />
-            </label>
-            <label>
-              <span>Border</span>
-              <input
-                type="color"
-                value={currentBorder}
-                onChange={(e) => onSetColors({ borderColor: e.target.value })}
-              />
-            </label>
-            <label>
-              <span>Text</span>
-              <input
-                type="color"
-                value={currentText}
-                onChange={(e) => onSetColors({ textColor: e.target.value })}
-              />
-            </label>
-            <button
-              type="button"
-              className="mf-chip-btn"
-              title="Reset to theme branch color"
-              onClick={onResetColors}
-            >
-              <RotateCcw size={12} aria-hidden="true" /> Auto
-            </button>
-          </div>
         </div>
       )}
 
       {panel === "edge-color" && (
         <div className="mf-ctx-popover">
           <div className="mf-ctx-popover-title">
-            {isMulti
-              ? `Node + Edge Color (${selectedNodes.length} Nodes)`
-              : "Node & Connected Edge Color"}
-          </div>
-
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <span>
+              {isMulti
+                ? `Node + Edge Color (${selectedNodes.length} Nodes)`
+                : "Node & Connected Edge Color"}
+            </span>
             <button
               type="button"
-              className={`mf-chip-btn ${!fillNodeWithEdge ? "is-active" : ""}`}
-              onClick={() => setFillNodeWithEdge(false)}
-            >
-              Border + Edge
-            </button>
-            <button
-              type="button"
-              className={`mf-chip-btn ${fillNodeWithEdge ? "is-active" : ""}`}
-              onClick={() => setFillNodeWithEdge(true)}
-            >
-              Fill + Border + Edge
-            </button>
-          </div>
-
-          <div className="mf-swatch-grid">
-            {NODE_COLOR_SWATCHES.map((swatch) => (
-              <button
-                key={swatch}
-                type="button"
-                className="mf-swatch"
-                aria-label={`Node and edge color ${swatch}`}
-                style={{ background: swatch }}
-                onClick={() =>
-                  onSetColors({
-                    edgeColor: swatch,
-                    borderColor: swatch,
-                    ...(fillNodeWithEdge || primary?.style?.color
-                      ? { color: swatch, textColor: getContrastTextColor(swatch) }
-                      : {}),
-                  })
-                }
-              />
-            ))}
-          </div>
-
-          <div className="mf-color-inputs-row">
-            <label>
-              <span>Node &amp; Edge</span>
-              <input
-                type="color"
-                value={currentEdge}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  onSetColors({
-                    edgeColor: val,
-                    borderColor: val,
-                    ...(fillNodeWithEdge || primary?.style?.color
-                      ? { color: val, textColor: getContrastTextColor(val) }
-                      : {}),
-                  });
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              className="mf-chip-btn"
+              className="mf-chip-btn mf-popover-reset"
               title="Reset to theme branch color"
               onClick={onResetColors}
             >
               <RotateCcw size={12} aria-hidden="true" /> Auto
             </button>
+          </div>
+
+          <div className="mf-swatch-grid">
+            <label className="mf-swatch mf-swatch-picker" title="Custom color">
+              <Pipette size={14} aria-hidden="true" />
+              <input
+                type="color"
+                aria-label="Custom border and edge color"
+                value={currentEdge}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  onSetColors({ edgeColor: v, borderColor: v });
+                }}
+              />
+            </label>
+            {NODE_PALETTE_SWATCHES.map((swatch) => (
+              <button
+                key={swatch}
+                type="button"
+                className="mf-swatch"
+                aria-label={`Border and edge color ${swatch}`}
+                style={{ background: swatch }}
+                onClick={() =>
+                  onSetColors({
+                    edgeColor: swatch,
+                    borderColor: swatch,
+                  })
+                }
+              />
+            ))}
           </div>
         </div>
       )}

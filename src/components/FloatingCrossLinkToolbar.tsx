@@ -34,7 +34,7 @@ export function FloatingCrossLinkToolbar({
 
   useEffect(() => {
     if (!colorPanelOpen) return;
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       if (barRef.current && !barRef.current.contains(e.target as Node)) {
         setColorPanelOpen(false);
       }
@@ -42,10 +42,10 @@ export function FloatingCrossLinkToolbar({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setColorPanelOpen(false);
     };
-    window.addEventListener("mousedown", onDown);
+    window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey);
     };
   }, [colorPanelOpen]);

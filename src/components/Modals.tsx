@@ -15,7 +15,9 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
         ["Backspace / Delete", "Delete selected node(s)"],
         ["Ctrl/Cmd + D", "Insert detached root node"],
         ["D", "Detach selected node into root"],
-        ["Ctrl/Cmd + Up/Down", "Reorder sibling up/down"],
+        ["Ctrl/Cmd + Up/Down", "Move sibling up / down"],
+        ["Ctrl/Cmd + Left/Right", "Move branch left / right of parent"],
+        ["Drag node", "Reorder sibling, flip side, or reparent"],
       ],
     },
     {

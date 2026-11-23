@@ -387,6 +387,79 @@ export function deleteNodes(
   return { doc: next, nextSelectedId: fallbackFocus };
 }
 
+function getEffectiveRootChildSide(
+  doc: MindMapDocument,
+  rootChildrenIds: string[],
+  childId: string
+): "left" | "right" {
+  if (doc.layout === "tree-right") return "right";
+  const child = doc.nodes[childId];
+  if (child?.side === "left" || child?.side === "right") return child.side;
+  const idx = rootChildrenIds.indexOf(childId);
+  return idx % 2 === 0 ? "right" : "left";
+}
+
+function getTopBranchId(doc: MindMapDocument, nodeId: string): string | null {
+  let cur = doc.nodes[nodeId];
+  while (cur && cur.parentId) {
+    const parent = doc.nodes[cur.parentId];
+    if (!parent) return null;
+    if (parent.parentId === null) return cur.id;
+    cur = parent;
+  }
+  return null;
+}
+
+export function getEffectiveNodeSide(doc: MindMapDocument, nodeId: string): "left" | "right" {
+  if (doc.layout === "tree-right") return "right";
+  const branchId = getTopBranchId(doc, nodeId);
+  if (!branchId) {
+    return doc.nodes[nodeId]?.side === "left" ? "left" : "right";
+  }
+  const branch = doc.nodes[branchId];
+  const root = branch?.parentId ? doc.nodes[branch.parentId] : undefined;
+  if (!branch || !root) return "right";
+  return getEffectiveRootChildSide(doc, root.childrenIds, branchId);
+}
+
+function normalizeRootChildrenSides(doc: MindMapDocument, rootId: string): void {
+  const root = doc.nodes[rootId];
+  if (!root || root.parentId !== null) return;
+  root.childrenIds.forEach((cid, idx) => {
+    const child = doc.nodes[cid];
+    if (!child) return;
+    if (doc.layout === "tree-right") {
+      child.side = "right";
+    } else if (child.side !== "left" && child.side !== "right") {
+      child.side = idx % 2 === 0 ? "right" : "left";
+    }
+  });
+}
+
+function setSubtreeSide(doc: MindMapDocument, rootId: string, side: "left" | "right"): void {
+  const walk = (id: string) => {
+    const n = doc.nodes[id];
+    if (!n) return;
+    n.side = side;
+    for (const cid of n.childrenIds) walk(cid);
+  };
+  walk(rootId);
+}
+
+function getVisualSiblingIds(doc: MindMapDocument, targetId: string): string[] {
+  const node = doc.nodes[targetId];
+  if (!node || !node.parentId) return [];
+  const parent = doc.nodes[node.parentId];
+  if (!parent) return [];
+  if (parent.parentId === null && doc.layout === "mindmap") {
+    const targetSide = getEffectiveRootChildSide(doc, parent.childrenIds, targetId);
+    return parent.childrenIds.filter(
+      (cid) => getEffectiveRootChildSide(doc, parent.childrenIds, cid) === targetSide
+    );
+  }
+  return parent.childrenIds;
+}
+
 export function reorderSibling(
   doc: MindMapDocument,
   targetId: string,
@@ -397,13 +470,194 @@ export function reorderSibling(
   const parent = doc.nodes[node.parentId];
   if (!parent) return doc;
 
+  const isRadialRootChild = parent.parentId === null && doc.layout === "mindmap";
+  const visualSiblings = getVisualSiblingIds(doc, targetId);
+  const visualIdx = visualSiblings.indexOf(targetId);
+  const nextVisualIdx = visualIdx + delta;
+  if (visualIdx < 0 || nextVisualIdx < 0 || nextVisualIdx >= visualSiblings.length) return doc;
+
+  const swapTargetId = visualSiblings[nextVisualIdx];
   const idx = parent.childrenIds.indexOf(targetId);
-  const nextIdx = idx + delta;
-  if (idx < 0 || nextIdx < 0 || nextIdx >= parent.childrenIds.length) return doc;
+  const nextIdx = parent.childrenIds.indexOf(swapTargetId);
+  if (idx < 0 || nextIdx < 0) return doc;
 
   const next = cloneDocument(doc);
+  if (isRadialRootChild) {
+    normalizeRootChildrenSides(next, parent.id);
+  }
   const list = next.nodes[node.parentId].childrenIds;
   [list[idx], list[nextIdx]] = [list[nextIdx], list[idx]];
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+export function moveNodeRelative(
+  doc: MindMapDocument,
+  targetId: string,
+  direction: "up" | "down" | "left" | "right"
+): MindMapDocument {
+  const node = doc.nodes[targetId];
+  if (!node || !node.parentId) return doc;
+
+  if (doc.layout === "org-chart") {
+    if (direction === "left" || direction === "up") {
+      return reorderSibling(doc, targetId, -1);
+    }
+    return reorderSibling(doc, targetId, 1);
+  }
+
+  if (direction === "up") return reorderSibling(doc, targetId, -1);
+  if (direction === "down") return reorderSibling(doc, targetId, 1);
+
+  const branchId = getTopBranchId(doc, targetId);
+  if (!branchId) return doc;
+  const currentSide = getEffectiveNodeSide(doc, branchId);
+  if (currentSide === direction) return doc;
+
+  const next = cloneDocument(doc);
+  const branch = next.nodes[branchId];
+  if (!branch || !branch.parentId) return doc;
+
+  normalizeRootChildrenSides(next, branch.parentId);
+  if (next.layout === "tree-right" && direction === "left") {
+    next.layout = "mindmap";
+  }
+  setSubtreeSide(next, branchId, direction);
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+export function getNodeMoveCapabilities(
+  doc: MindMapDocument,
+  targetId: string
+): { canMoveUp: boolean; canMoveDown: boolean; canMoveLeft: boolean; canMoveRight: boolean } {
+  const node = doc.nodes[targetId];
+  if (!node || !node.parentId) {
+    return { canMoveUp: false, canMoveDown: false, canMoveLeft: false, canMoveRight: false };
+  }
+  const visualSiblings = getVisualSiblingIds(doc, targetId);
+  const pos = visualSiblings.indexOf(targetId);
+
+  if (doc.layout === "org-chart") {
+    return {
+      canMoveUp: false,
+      canMoveDown: false,
+      canMoveLeft: pos > 0,
+      canMoveRight: pos >= 0 && pos < visualSiblings.length - 1,
+    };
+  }
+
+  const side = getEffectiveNodeSide(doc, targetId);
+  return {
+    canMoveUp: pos > 0,
+    canMoveDown: pos >= 0 && pos < visualSiblings.length - 1,
+    canMoveLeft: side === "right",
+    canMoveRight: side === "left",
+  };
+}
+
+export function repositionNode(
+  doc: MindMapDocument,
+  draggedId: string,
+  targetId: string,
+  placement: "before" | "after" | "inside",
+  targetSide?: "left" | "right"
+): MindMapDocument {
+  const dragged = doc.nodes[draggedId];
+  const target = doc.nodes[targetId];
+  if (!dragged || !target || !dragged.parentId || draggedId === targetId) return doc;
+
+  const subtreeIds = getSubtreeIds(doc, draggedId, true);
+  if (subtreeIds.includes(targetId)) return doc;
+
+  const next = cloneDocument(doc);
+  const oldParentId = dragged.parentId;
+  const oldRootId = doc.nodes[oldParentId]?.parentId === null ? oldParentId : null;
+  if (oldRootId) normalizeRootChildrenSides(next, oldRootId);
+
+  if (placement === "inside") {
+    const newParent = next.nodes[targetId];
+    if (!newParent) return doc;
+
+    let resolvedSide: "left" | "right" | undefined;
+    if (newParent.parentId === null) {
+      normalizeRootChildrenSides(next, newParent.id);
+      resolvedSide =
+        targetSide ?? (next.layout === "tree-right" ? "right" : getEffectiveNodeSide(doc, draggedId));
+      if (next.layout === "tree-right" && resolvedSide === "left") {
+        next.layout = "mindmap";
+      }
+    } else if (next.layout !== "org-chart") {
+      resolvedSide = getEffectiveNodeSide(doc, targetId);
+    }
+
+    const sameParent = oldParentId === targetId;
+    const sameSide = !resolvedSide || getEffectiveNodeSide(doc, draggedId) === resolvedSide;
+    if (sameParent && sameSide) return doc;
+
+    const oldParent = next.nodes[oldParentId];
+    if (oldParent) {
+      oldParent.childrenIds = oldParent.childrenIds.filter((cid) => cid !== draggedId);
+    }
+    next.nodes[draggedId].parentId = targetId;
+    newParent.collapsed = false;
+    if (!newParent.childrenIds.includes(draggedId)) {
+      newParent.childrenIds.push(draggedId);
+    }
+    if (resolvedSide) {
+      setSubtreeSide(next, draggedId, resolvedSide);
+    }
+    next.updatedAt = new Date().toISOString();
+    return next;
+  }
+
+  if (!target.parentId) return doc;
+  const newParentId = target.parentId;
+  const newParent = next.nodes[newParentId];
+  if (!newParent) return doc;
+
+  if (newParent.parentId === null) {
+    normalizeRootChildrenSides(next, newParent.id);
+  }
+
+  let resolvedSide: "left" | "right" | undefined;
+  if (next.layout !== "org-chart") {
+    resolvedSide =
+      newParent.parentId === null
+        ? targetSide ?? getEffectiveRootChildSide(next, newParent.childrenIds, targetId)
+        : getEffectiveNodeSide(next, newParentId);
+    if (newParent.parentId === null && next.layout === "tree-right" && resolvedSide === "left") {
+      next.layout = "mindmap";
+    }
+  }
+
+  const oldParent = next.nodes[oldParentId];
+  if (oldParent) {
+    oldParent.childrenIds = oldParent.childrenIds.filter((cid) => cid !== draggedId);
+  }
+  next.nodes[draggedId].parentId = newParentId;
+  const targetIdx = newParent.childrenIds.indexOf(targetId);
+  const insertIdx = targetIdx >= 0 ? (placement === "before" ? targetIdx : targetIdx + 1) : newParent.childrenIds.length;
+  newParent.childrenIds.splice(insertIdx, 0, draggedId);
+  if (resolvedSide) {
+    setSubtreeSide(next, draggedId, resolvedSide);
+  }
+
+  // Avoid committing a no-op if parent, side, and visual sibling order did not change
+  if (oldParentId === newParentId) {
+    const prevOrder = getVisualSiblingIds(doc, draggedId);
+    const nextOrder = getVisualSiblingIds(next, draggedId);
+    const prevSide = getEffectiveNodeSide(doc, draggedId);
+    const nextSide = getEffectiveNodeSide(next, draggedId);
+    if (
+      prevSide === nextSide &&
+      prevOrder.length === nextOrder.length &&
+      prevOrder.every((id, i) => id === nextOrder[i])
+    ) {
+      return doc;
+    }
+  }
+
   next.updatedAt = new Date().toISOString();
   return next;
 }
