@@ -928,14 +928,25 @@ export function pasteSubtreeNodes(
 export function setNodesColor(
   doc: MindMapDocument,
   ids: string[],
-  colors: { color?: string; borderColor?: string; edgeColor?: string; textColor?: string }
+  colors: { color?: string; borderColor?: string; edgeColor?: string; textColor?: string | null }
 ): MindMapDocument {
   const next = updateNodesStyle(doc, ids, (node) => {
     node.style = node.style || {};
-    if (colors.color !== undefined) node.style.color = colors.color;
+    if (colors.color === "none") {
+      node.style.color = "none";
+      if (colors.textColor === undefined) {
+        delete node.style.textColor;
+      }
+    } else if (colors.color !== undefined) {
+      node.style.color = colors.color;
+    }
     if (colors.borderColor !== undefined) node.style.borderColor = colors.borderColor;
     if (colors.edgeColor !== undefined) node.style.edgeColor = colors.edgeColor;
-    if (colors.textColor !== undefined) node.style.textColor = colors.textColor;
+    if (colors.textColor === null) {
+      delete node.style.textColor;
+    } else if (colors.textColor !== undefined) {
+      node.style.textColor = colors.textColor;
+    }
   });
   next.colorMode = "custom";
   return next;

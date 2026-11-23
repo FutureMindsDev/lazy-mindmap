@@ -744,17 +744,18 @@ export function App() {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      const rawX = e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX;
+      const rawY = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
       if (e.ctrlKey || e.metaKey) {
         const rect = el.getBoundingClientRect();
         lastCursorX = e.clientX - rect.left;
         lastCursorY = e.clientY - rect.top;
-        const rawDelta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-        pendingZoomDelta += Math.max(-60, Math.min(60, rawDelta));
+        pendingZoomDelta += Math.max(-60, Math.min(60, rawY));
       } else if (e.shiftKey) {
-        pendingPanX += e.deltaY || e.deltaX;
+        pendingPanX += rawY || rawX;
       } else {
-        pendingPanX += e.deltaX;
-        pendingPanY += e.deltaY;
+        pendingPanX += rawX;
+        pendingPanY += rawY;
       }
       if (rafId === null) {
         rafId = window.requestAnimationFrame(flushWheel);
@@ -796,7 +797,7 @@ export function App() {
       }
 
       commitDoc(
-        updateNodesStyle(doc, [nodeId], (n) => {
+        updateNodesStyle(docRef.current, [nodeId], (n) => {
           if (addedImages.length > 0) {
             n.images = [...(n.images || []), ...addedImages];
           }
@@ -807,7 +808,7 @@ export function App() {
       );
       announce(`Attached ${list.length} file(s) to node`);
     },
-    [doc, commitDoc, announce]
+    [commitDoc, announce]
   );
 
   // Global canvas Paste handler (Ctrl/Cmd+V outside editor)
@@ -1064,7 +1065,23 @@ export function App() {
 
   const handleAddDetachedRootNode = useCallback(() => {
     const cur = hasSelection ? layouts[primarySelectedId] : layouts[doc.rootIds[0]];
-    const pos = cur ? { x: cur.x + cur.width / 2, y: cur.y + cur.height + 110 } : { x: 0, y: 180 };
+    const activeRootId = cur?.rootId || doc.rootIds[0];
+    const activeRootLayout = activeRootId ? layouts[activeRootId] : undefined;
+    let maxY = -Infinity;
+    for (const info of Object.values(layouts)) {
+      if (info.rootId === activeRootId) {
+        maxY = Math.max(maxY, info.y + info.height);
+      }
+    }
+    const pos =
+      activeRootLayout && Number.isFinite(maxY)
+        ? {
+            x: Math.round(activeRootLayout.x + activeRootLayout.width / 2),
+            y: Math.round(maxY + 110),
+          }
+        : cur
+        ? { x: Math.round(cur.x + cur.width / 2), y: Math.round(cur.y + cur.height + 110) }
+        : { x: 0, y: 180 };
     const { doc: next, newId } = addDetachedRootNode(doc, pos);
     commitDoc(next);
     setSelectedIds([newId]);
@@ -1242,15 +1259,33 @@ export function App() {
       const startY = e.clientY;
       const origX = viewport.x;
       const origY = viewport.y;
+      let rafId: number | null = null;
+      let latestClientX = startX;
+      let latestClientY = startY;
 
-      const onMove = (ev: MouseEvent) => {
+      const flushPan = () => {
+        rafId = null;
+        const dx = latestClientX - startX;
+        const dy = latestClientY - startY;
         setViewport((v) => ({
           ...v,
-          x: origX + (ev.clientX - startX),
-          y: origY + (ev.clientY - startY),
+          x: origX + dx,
+          y: origY + dy,
         }));
       };
+
+      const onMove = (ev: MouseEvent) => {
+        latestClientX = ev.clientX;
+        latestClientY = ev.clientY;
+        if (rafId === null) {
+          rafId = window.requestAnimationFrame(flushPan);
+        }
+      };
       const onUp = () => {
+        if (rafId !== null) {
+          window.cancelAnimationFrame(rafId);
+          flushPan();
+        }
         setIsPanning(false);
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
@@ -1327,14 +1362,15 @@ export function App() {
         const origCenterX = layoutInfo.x + layoutInfo.width / 2;
         const origCenterY = layoutInfo.y + layoutInfo.height / 2;
         let moved = false;
+        let rafId: number | null = null;
+        let latestClientX = startClientX;
+        let latestClientY = startClientY;
 
-        const onMove = (ev: MouseEvent) => {
+        const applyDragPosition = () => {
+          rafId = null;
           const scale = viewportStateRef.current.scale;
-          const dx = (ev.clientX - startClientX) / scale;
-          const dy = (ev.clientY - startClientY) / scale;
-          if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
-          if (!moved) return;
-
+          const dx = (latestClientX - startClientX) / scale;
+          const dy = (latestClientY - startClientY) / scale;
           setDoc((prev) => {
             const next = cloneDocument(prev);
             if (next.nodes[nodeId]) {
@@ -1347,7 +1383,53 @@ export function App() {
           });
         };
 
+        const onMove = (ev: MouseEvent) => {
+          const scale = viewportStateRef.current.scale;
+          const dx = (ev.clientX - startClientX) / scale;
+          const dy = (ev.clientY - startClientY) / scale;
+          if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+            moved = true;
+          }
+          if (!moved) return;
+          latestClientX = ev.clientX;
+          latestClientY = ev.clientY;
+          if (rafId === null) {
+            rafId = window.requestAnimationFrame(applyDragPosition);
+          }
+        };
+
         const onUp = () => {
+          if (rafId !== null) {
+            window.cancelAnimationFrame(rafId);
+            rafId = null;
+            if (moved) applyDragPosition();
+          }
+          if (moved) {
+            window.requestAnimationFrame(() => {
+              const resolved = layoutsRef.current[nodeId];
+              if (!resolved) return;
+              const resolvedCenterX = Math.round(resolved.x + resolved.width / 2);
+              const resolvedCenterY = Math.round(resolved.y + resolved.height / 2);
+              setDoc((prev) => {
+                const curNode = prev.nodes[nodeId];
+                if (!curNode) return prev;
+                if (
+                  curNode.position?.x === resolvedCenterX &&
+                  curNode.position?.y === resolvedCenterY
+                ) {
+                  return prev;
+                }
+                const next = cloneDocument(prev);
+                if (next.nodes[nodeId]) {
+                  next.nodes[nodeId].position = {
+                    x: resolvedCenterX,
+                    y: resolvedCenterY,
+                  };
+                }
+                return next;
+              });
+            });
+          }
           window.removeEventListener("mousemove", onMove);
           window.removeEventListener("mouseup", onUp);
         };
@@ -1489,267 +1571,510 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedCrossLinkId, selectedIds.length, editingId, anyDialogOpen, deleteCrossLink]);
 
+  const crossLinkPathMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof buildCrossLinkPath>>();
+    for (const xl of doc.crossLinks) {
+      const fromL = layouts[xl.fromId];
+      const toL = layouts[xl.toId];
+      if (!fromL || !toL) continue;
+      map.set(
+        xl.id,
+        buildCrossLinkPath(fromL, toL, {
+          layouts,
+          label: xl.label,
+          layer: xl.layer || "above",
+        })
+      );
+    }
+    return map;
+  }, [doc.crossLinks, layouts]);
+
   const activeCrossLinkData = useMemo(() => {
     if (!selectedCrossLinkId || selectedIds.length > 0) return null;
     const xl = doc.crossLinks.find((item) => item.id === selectedCrossLinkId);
     if (!xl) return null;
-    const fromL = layouts[xl.fromId];
-    const toL = layouts[xl.toId];
-    if (!fromL || !toL) return null;
-    const { labelX, labelY } = buildCrossLinkPath(fromL, toL, {
-      layouts,
-      label: xl.label,
-      layer: xl.layer || "above",
-    });
-    return { crossLink: xl, anchorPoint: { x: labelX, y: labelY } };
-  }, [selectedCrossLinkId, selectedIds.length, doc.crossLinks, layouts]);
+    const pathInfo = crossLinkPathMap.get(xl.id);
+    if (!pathInfo) return null;
+    return { crossLink: xl, anchorPoint: { x: pathInfo.labelX, y: pathInfo.labelY } };
+  }, [selectedCrossLinkId, selectedIds.length, doc.crossLinks, crossLinkPathMap]);
 
-  const renderCrossLinkSvgLayer = (layerFilter: "behind" | "above") => {
-    const filtered = doc.crossLinks.filter((xl) => (xl.layer || "above") === layerFilter);
-    const elevatedBehindLabels =
-      layerFilter === "above"
-        ? doc.crossLinks.filter(
-            (xl) => (xl.layer || "above") === "behind" && Boolean(xl.label?.trim())
-          )
-        : [];
+  const getZoomScale = useCallback(() => viewportStateRef.current.scale, []);
 
-    const makeSelectHandlers = (xlId: string) => ({
-      onMouseDown: (e: ReactMouseEvent) => {
-        if (e.button !== 0 || editingId || crossLinkSourceId) return;
-        e.stopPropagation();
-        setStylePopoverOpen(false);
-        setStickerPopoverOpen(false);
-        setSelectedIds([]);
-        setSelectedCrossLinkId(xlId);
-      },
-      onDoubleClick: (e: ReactMouseEvent) => {
-        if (editingId || crossLinkSourceId) return;
-        e.stopPropagation();
-        setStylePopoverOpen(false);
-        setStickerPopoverOpen(false);
-        setSelectedIds([]);
-        setSelectedCrossLinkId(xlId);
-        setAutoEditCrossLinkId(xlId);
-      },
-    });
-
-    const renderLabelText = (
-      xl: CrossLink,
-      labelX: number,
-      labelY: number,
-      color: string,
-      handlers: ReturnType<typeof makeSelectHandlers>
-    ) => {
-      const lines = xl.label ? wrapCrossLinkLabelLines(xl.label, 42) : [];
-      if (lines.length === 0) return null;
-      const lineHeight = 15;
-      const startY = labelY - ((lines.length - 1) * lineHeight) / 2 + 4;
-      return (
-        <text
-          x={labelX}
-          y={startY}
-          textAnchor="middle"
-          fill={color}
-          fontSize="12"
-          fontWeight="700"
-          className="mf-crosslink-label mf-crosslink-label-hit"
-          onMouseDown={handlers.onMouseDown}
-          onDoubleClick={handlers.onDoubleClick}
-        >
-          {lines.map((line, idx) => (
-            <tspan key={idx} x={labelX} dy={idx === 0 ? 0 : lineHeight}>
-              {line}
-            </tspan>
-          ))}
-        </text>
-      );
-    };
-
-    const renderCrossLinkMarker = (id: string, headType: CrossLinkHeadType, color: string) => {
-      if (headType === "none") return null;
-      if (headType === "circle-filled") {
-        return (
-          <marker
-            key={id}
-            id={id}
-            viewBox="0 0 10 10"
-            refX="8.2"
-            refY="5"
-            markerWidth="6.2"
-            markerHeight="6.2"
-            orient="auto-start-reverse"
-          >
-            <circle cx="5" cy="5" r="3.6" fill={color} />
-          </marker>
-        );
+  const handleCommitEdit = useCallback(
+    (id: string, nextText: string) => {
+      setEditingId(null);
+      const curDoc = docRef.current;
+      const cur = curDoc.nodes[id];
+      if (cur && cur.text !== nextText) {
+        const nextDoc = updateNodesStyle(curDoc, [id], (n) => {
+          n.text = nextText;
+        });
+        if (curDoc.rootIds[0] === id) {
+          nextDoc.title = nextText.split("\n")[0].replace(/[*#`]/g, "").trim() || nextDoc.title;
+        }
+        commitDoc(nextDoc);
       }
-      if (headType === "circle-outline") {
+    },
+    [commitDoc]
+  );
+
+  const handleCancelEdit = useCallback(() => setEditingId(null), []);
+
+  const handleUpdateNodeTextDirect = useCallback(
+    (id: string, nextText: string) => {
+      commitDoc(
+        updateNodesStyle(docRef.current, [id], (n) => {
+          n.text = nextText;
+        })
+      );
+    },
+    [commitDoc]
+  );
+
+  const handleToggleCollapse = useCallback(
+    (id: string) => commitDoc(toggleCollapseNode(docRef.current, id), false),
+    [commitDoc]
+  );
+
+  const handleAddChildQuick = useCallback(
+    (parentId: string) => {
+      const { doc: next, newId } = addChildNode(docRef.current, parentId);
+      commitDoc(next);
+      setSelectedIds([newId]);
+      setEditingId(newId);
+    },
+    [commitDoc]
+  );
+
+  const handleResizeNode = useCallback(
+    (nodeId: string, dims: { width?: number; minHeight?: number } | "auto") => {
+      commitDoc(resizeNodesBatch(docRef.current, [nodeId], dims), false);
+    },
+    [commitDoc]
+  );
+
+  const handleResizeImage = useCallback(
+    (nodeId: string, imgId: string, width: number) => {
+      commitDoc(
+        updateNodesStyle(docRef.current, [nodeId], (n) => {
+          n.images = (n.images || []).map((img) =>
+            img.id === imgId ? { ...img, width } : img
+          );
+        }),
+        false
+      );
+    },
+    [commitDoc]
+  );
+
+  const handleUpdateImageProps = useCallback(
+    (nodeId: string, imgId: string, patch: Partial<NodeImage>) => {
+      commitDoc(
+        updateNodesStyle(docRef.current, [nodeId], (n) => {
+          n.images = (n.images || []).map((img) =>
+            img.id === imgId ? { ...img, ...patch } : img
+          );
+        })
+      );
+    },
+    [commitDoc]
+  );
+
+  const handleRemoveImage = useCallback(
+    (nodeId: string, imgId: string) => {
+      commitDoc(
+        updateNodesStyle(docRef.current, [nodeId], (n) => {
+          n.images = (n.images || []).filter((img) => img.id !== imgId);
+        })
+      );
+      announce("Removed photo from node");
+    },
+    [commitDoc, announce]
+  );
+
+  const handlePasteImageInEditor = useCallback(
+    async (nodeId: string, file: File) => {
+      await attachFilesToNode(nodeId, [file]);
+    },
+    [attachFilesToNode]
+  );
+
+  const handleOpenDrawerForNode = useCallback((id: string) => {
+    setSelectedIds([id]);
+    setDrawerOpen(true);
+  }, []);
+
+  const renderCrossLinkSvgLayer = useCallback(
+    (layerFilter: "behind" | "above") => {
+      const filtered = doc.crossLinks.filter((xl) => (xl.layer || "above") === layerFilter);
+      const elevatedBehindLabels =
+        layerFilter === "above"
+          ? doc.crossLinks.filter(
+              (xl) => (xl.layer || "above") === "behind" && Boolean(xl.label?.trim())
+            )
+          : [];
+
+      const makeSelectHandlers = (xlId: string) => ({
+        onMouseDown: (e: ReactMouseEvent) => {
+          if (e.button !== 0 || editingId || crossLinkSourceId) return;
+          e.stopPropagation();
+          setStylePopoverOpen(false);
+          setStickerPopoverOpen(false);
+          setSelectedIds([]);
+          setSelectedCrossLinkId(xlId);
+        },
+        onDoubleClick: (e: ReactMouseEvent) => {
+          if (editingId || crossLinkSourceId) return;
+          e.stopPropagation();
+          setStylePopoverOpen(false);
+          setStickerPopoverOpen(false);
+          setSelectedIds([]);
+          setSelectedCrossLinkId(xlId);
+          setAutoEditCrossLinkId(xlId);
+        },
+      });
+
+      const renderLabelText = (
+        xl: CrossLink,
+        labelX: number,
+        labelY: number,
+        color: string,
+        handlers: ReturnType<typeof makeSelectHandlers>
+      ) => {
+        const lines = xl.label ? wrapCrossLinkLabelLines(xl.label, 42) : [];
+        if (lines.length === 0) return null;
+        const lineHeight = 15;
+        const startY = labelY - ((lines.length - 1) * lineHeight) / 2 + 4;
+        return (
+          <text
+            x={labelX}
+            y={startY}
+            textAnchor="middle"
+            fill={color}
+            fontSize="12"
+            fontWeight="700"
+            className="mf-crosslink-label mf-crosslink-label-hit"
+            onMouseDown={handlers.onMouseDown}
+            onDoubleClick={handlers.onDoubleClick}
+          >
+            {lines.map((line, idx) => (
+              <tspan key={idx} x={labelX} dy={idx === 0 ? 0 : lineHeight}>
+                {line}
+              </tspan>
+            ))}
+          </text>
+        );
+      };
+
+      const renderCrossLinkMarker = (id: string, headType: CrossLinkHeadType, color: string) => {
+        if (headType === "none") return null;
+        if (headType === "circle-filled") {
+          return (
+            <marker
+              key={id}
+              id={id}
+              viewBox="0 0 10 10"
+              refX="8.2"
+              refY="5"
+              markerWidth="6.2"
+              markerHeight="6.2"
+              orient="auto-start-reverse"
+            >
+              <circle cx="5" cy="5" r="3.6" fill={color} />
+            </marker>
+          );
+        }
+        if (headType === "circle-outline") {
+          return (
+            <marker
+              key={id}
+              id={id}
+              viewBox="0 0 10 10"
+              refX="8.2"
+              refY="5"
+              markerWidth="6.5"
+              markerHeight="6.5"
+              orient="auto-start-reverse"
+            >
+              <circle
+                cx="5"
+                cy="5"
+                r="3.3"
+                fill="var(--bg-surface)"
+                stroke={color}
+                strokeWidth="1.8"
+              />
+            </marker>
+          );
+        }
         return (
           <marker
             key={id}
             id={id}
             viewBox="0 0 10 10"
-            refX="8.2"
+            refX="9"
             refY="5"
             markerWidth="6.5"
             markerHeight="6.5"
             orient="auto-start-reverse"
           >
-            <circle
-              cx="5"
-              cy="5"
-              r="3.3"
-              fill="var(--bg-surface)"
-              stroke={color}
-              strokeWidth="1.8"
-            />
+            <path d="M 0 1 L 10 5 L 0 9 z" fill={color} />
           </marker>
         );
-      }
-      return (
-        <marker
-          key={id}
-          id={id}
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="6.5"
-          markerHeight="6.5"
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 1 L 10 5 L 0 9 z" fill={color} />
-        </marker>
-      );
-    };
+      };
 
-    return (
-      <>
-        <defs>
-          {layerFilter === "above" && (
-            <marker
-              id="mf-xl-preview-arrow"
-              viewBox="0 0 10 10"
-              refX="8"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
-            </marker>
-          )}
-          {filtered.flatMap((xl) => {
+      return (
+        <>
+          <defs>
+            {layerFilter === "above" && (
+              <marker
+                id="mf-xl-preview-arrow"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
+              </marker>
+            )}
+            {filtered.flatMap((xl) => {
+              const color = xl.color || "#f59e0b";
+              const startHead = xl.startHead || "none";
+              const endHead = xl.endHead || "arrow";
+              return [
+                renderCrossLinkMarker(`mf-xl-start-${xl.id}`, startHead, color),
+                renderCrossLinkMarker(`mf-xl-end-${xl.id}`, endHead, color),
+              ];
+            })}
+          </defs>
+          {filtered.map((xl) => {
+            const pathInfo = crossLinkPathMap.get(xl.id);
+            if (!pathInfo) return null;
+            const { path, labelX, labelY, forceLabelAbove } = pathInfo;
             const color = xl.color || "#f59e0b";
+            const isSelected = selectedCrossLinkId === xl.id && selectedIds.length === 0;
             const startHead = xl.startHead || "none";
             const endHead = xl.endHead || "arrow";
-            return [
-              renderCrossLinkMarker(`mf-xl-start-${xl.id}`, startHead, color),
-              renderCrossLinkMarker(`mf-xl-end-${xl.id}`, endHead, color),
-            ];
-          })}
-        </defs>
-        {filtered.map((xl) => {
-          const fromL = layouts[xl.fromId];
-          const toL = layouts[xl.toId];
-          if (!fromL || !toL) return null;
-          const layer = xl.layer || "above";
-          const { path, labelX, labelY, forceLabelAbove } = buildCrossLinkPath(fromL, toL, {
-            layouts,
-            label: xl.label,
-            layer,
-          });
-          const color = xl.color || "#f59e0b";
-          const isSelected = selectedCrossLinkId === xl.id && selectedIds.length === 0;
-          const startHead = xl.startHead || "none";
-          const endHead = xl.endHead || "arrow";
-          const dashArray =
-            xl.strokeStyle === "solid"
-              ? undefined
-              : xl.strokeStyle === "dotted"
-              ? "2 6"
-              : "6 5";
-          const handlers = makeSelectHandlers(xl.id);
+            const dashArray =
+              xl.strokeStyle === "solid"
+                ? undefined
+                : xl.strokeStyle === "dotted"
+                ? "2 6"
+                : "6 5";
+            const handlers = makeSelectHandlers(xl.id);
 
-          return (
-            <g key={xl.id}>
-              {isSelected && (
+            return (
+              <g key={xl.id}>
+                {isSelected && (
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={7}
+                    opacity={0.24}
+                    strokeLinecap="round"
+                  />
+                )}
+                <path
+                  d={path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={16}
+                  className="mf-crosslink-hit"
+                  onMouseDown={handlers.onMouseDown}
+                  onDoubleClick={handlers.onDoubleClick}
+                />
                 <path
                   d={path}
                   fill="none"
                   stroke={color}
-                  strokeWidth={7}
-                  opacity={0.24}
+                  strokeWidth={isSelected ? 2.8 : 2}
+                  strokeDasharray={dashArray}
+                  strokeLinecap="round"
+                  markerStart={startHead !== "none" ? `url(#mf-xl-start-${xl.id})` : undefined}
+                  markerEnd={endHead !== "none" ? `url(#mf-xl-end-${xl.id})` : undefined}
+                />
+                {!forceLabelAbove && renderLabelText(xl, labelX, labelY, color, handlers)}
+              </g>
+            );
+          })}
+          {elevatedBehindLabels.map((xl) => {
+            const pathInfo = crossLinkPathMap.get(xl.id);
+            if (!pathInfo || !pathInfo.forceLabelAbove) return null;
+            const { labelX, labelY } = pathInfo;
+            const color = xl.color || "#f59e0b";
+            const handlers = makeSelectHandlers(xl.id);
+            return (
+              <g key={`elevated-lbl-${xl.id}`}>{renderLabelText(xl, labelX, labelY, color, handlers)}</g>
+            );
+          })}
+          {layerFilter === "above" &&
+            crossLinkSourceId &&
+            layouts[crossLinkSourceId] &&
+            crossLinkPointer &&
+            (() => {
+              const src = layouts[crossLinkSourceId];
+              const startEdge = getNodeEdgeMidpoint(src, crossLinkPointer.x, crossLinkPointer.y);
+              const sx = startEdge.x;
+              const sy = startEdge.y;
+              const tx = crossLinkPointer.x;
+              const ty = crossLinkPointer.y;
+              const dx = tx - sx;
+              const dy = ty - sy;
+              const cx = (sx + tx) / 2 - dy * 0.14;
+              const cy = (sy + ty) / 2 + dx * 0.14 - 16;
+              return (
+                <path
+                  d={`M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`}
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth={2.4}
+                  strokeDasharray="6 5"
+                  strokeLinecap="round"
+                  markerEnd="url(#mf-xl-preview-arrow)"
+                  style={{ pointerEvents: "none" }}
+                />
+              );
+            })()}
+        </>
+      );
+    },
+    [
+      doc.crossLinks,
+      layouts,
+      crossLinkPathMap,
+      editingId,
+      crossLinkSourceId,
+      crossLinkPointer,
+      selectedCrossLinkId,
+      selectedIds.length,
+    ]
+  );
+
+  const canvasWorldContent = useMemo(
+    () => (
+      <>
+        {/* Back SVG layer: tree branch connectors + cross-links layered behind nodes */}
+        <svg className="mf-svg-layer mf-svg-branches">
+          {Object.values(doc.nodes).map((node) => {
+            const pLayout = layouts[node.id];
+            if (!pLayout || node.collapsed) return null;
+            return node.childrenIds.map((cid) => {
+              const cLayout = layouts[cid];
+              if (!cLayout) return null;
+              const path = buildConnectorPath(pLayout, cLayout, doc.connectorStyle, doc.layout);
+              return (
+                <path
+                  key={`${node.id}-${cid}`}
+                  d={path}
+                  fill="none"
+                  stroke={cLayout.branchColor}
+                  strokeWidth={Math.max(1.8, 3.2 - cLayout.depth * 0.4)}
                   strokeLinecap="round"
                 />
-              )}
-              <path
-                d={path}
-                fill="none"
-                stroke="transparent"
-                strokeWidth={16}
-                className="mf-crosslink-hit"
-                onMouseDown={handlers.onMouseDown}
-                onDoubleClick={handlers.onDoubleClick}
-              />
-              <path
-                d={path}
-                fill="none"
-                stroke={color}
-                strokeWidth={isSelected ? 2.8 : 2}
-                strokeDasharray={dashArray}
-                strokeLinecap="round"
-                markerStart={startHead !== "none" ? `url(#mf-xl-start-${xl.id})` : undefined}
-                markerEnd={endHead !== "none" ? `url(#mf-xl-end-${xl.id})` : undefined}
-              />
-              {!forceLabelAbove && renderLabelText(xl, labelX, labelY, color, handlers)}
-            </g>
+              );
+            });
+          })}
+          {renderCrossLinkSvgLayer("behind")}
+        </svg>
+
+        {Object.values(layouts).map((info: LayoutNodeInfo) => {
+          const node = doc.nodes[info.id];
+          if (!node) return null;
+          return (
+            <MindMapNodeCard
+              key={node.id}
+              node={node}
+              layout={info}
+              colorMode={doc.colorMode || "colorful"}
+              getZoomScale={getZoomScale}
+              isSelected={selectedIds.includes(node.id)}
+              isEditing={editingId === node.id}
+              isCrossLinkSource={crossLinkSourceId === node.id}
+              isDragging={dragState?.nodeId === node.id}
+              dragOffset={
+                dragState?.nodeId === node.id ? { dx: dragState.dx, dy: dragState.dy } : null
+              }
+              onSelect={handleSelectNode}
+              onStartEdit={setEditingId}
+              onCommitEdit={handleCommitEdit}
+              onCancelEdit={handleCancelEdit}
+              onUpdateNodeTextDirect={handleUpdateNodeTextDirect}
+              onToggleCollapse={handleToggleCollapse}
+              onAddChildQuick={handleAddChildQuick}
+              onResizeNode={handleResizeNode}
+              onOpenImageLightbox={setLightboxImage}
+              onResizeImage={handleResizeImage}
+              onUpdateImageProps={handleUpdateImageProps}
+              onRemoveImage={handleRemoveImage}
+              onDropFilesOnNode={attachFilesToNode}
+              onPasteImageInEditor={handlePasteImageInEditor}
+              onOpenDrawer={handleOpenDrawerForNode}
+              onSizeChange={handleSizeChange}
+              onAnnounce={announce}
+              onDragNodeStart={handleDragNodeStart}
+            />
           );
         })}
-        {elevatedBehindLabels.map((xl) => {
-          const fromL = layouts[xl.fromId];
-          const toL = layouts[xl.toId];
-          if (!fromL || !toL) return null;
-          const { labelX, labelY, forceLabelAbove } = buildCrossLinkPath(fromL, toL, {
-            layouts,
-            label: xl.label,
-            layer: "behind",
-          });
-          if (!forceLabelAbove) return null;
-          const color = xl.color || "#f59e0b";
-          const handlers = makeSelectHandlers(xl.id);
-          return <g key={`elevated-lbl-${xl.id}`}>{renderLabelText(xl, labelX, labelY, color, handlers)}</g>;
-        })}
-        {layerFilter === "above" &&
-          crossLinkSourceId &&
-          layouts[crossLinkSourceId] &&
-          crossLinkPointer &&
-          (() => {
-            const src = layouts[crossLinkSourceId];
-            const startEdge = getNodeEdgeMidpoint(src, crossLinkPointer.x, crossLinkPointer.y);
-            const sx = startEdge.x;
-            const sy = startEdge.y;
-            const tx = crossLinkPointer.x;
-            const ty = crossLinkPointer.y;
-            const dx = tx - sx;
-            const dy = ty - sy;
-            const cx = (sx + tx) / 2 - dy * 0.14;
-            const cy = (sy + ty) / 2 + dx * 0.14 - 16;
-            return (
-              <path
-                d={`M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`}
-                fill="none"
-                stroke="#f59e0b"
-                strokeWidth={2.4}
-                strokeDasharray="6 5"
-                strokeLinecap="round"
-                markerEnd="url(#mf-xl-preview-arrow)"
-                style={{ pointerEvents: "none" }}
-              />
-            );
-          })()}
+
+        {dragDropHint && (
+          <div
+            className={
+              dragDropHint.indicator.kind === "line"
+                ? "mf-drop-indicator-line"
+                : "mf-drop-indicator-box"
+            }
+            style={{
+              transform: `translate(${dragDropHint.indicator.x}px, ${dragDropHint.indicator.y}px)`,
+              width: `${dragDropHint.indicator.width}px`,
+              height: `${dragDropHint.indicator.height}px`,
+            }}
+          >
+            {dragDropHint.indicator.label && (
+              <span className="mf-drop-indicator-badge">{dragDropHint.indicator.label}</span>
+            )}
+          </div>
+        )}
+
+        {/* Front SVG layer: cross-link lines layered above all node cards */}
+        <svg className="mf-svg-layer mf-svg-crosslinks">
+          {renderCrossLinkSvgLayer("above")}
+        </svg>
       </>
-    );
-  };
+    ),
+    [
+      doc.nodes,
+      doc.connectorStyle,
+      doc.layout,
+      doc.colorMode,
+      layouts,
+      selectedIds,
+      editingId,
+      crossLinkSourceId,
+      dragState,
+      dragDropHint,
+      getZoomScale,
+      handleSelectNode,
+      handleCommitEdit,
+      handleCancelEdit,
+      handleUpdateNodeTextDirect,
+      handleToggleCollapse,
+      handleAddChildQuick,
+      handleResizeNode,
+      handleResizeImage,
+      handleUpdateImageProps,
+      handleRemoveImage,
+      attachFilesToNode,
+      handlePasteImageInEditor,
+      handleOpenDrawerForNode,
+      handleSizeChange,
+      announce,
+      handleDragNodeStart,
+      renderCrossLinkSvgLayer,
+    ]
+  );
 
   return (
     <div className="mf-app">
@@ -1944,153 +2269,10 @@ export function App() {
           <div
             className="mf-canvas-world"
             style={{
-              transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+              transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.scale})`,
             }}
           >
-            {/* Back SVG layer: tree branch connectors + cross-links layered behind nodes */}
-            <svg className="mf-svg-layer mf-svg-branches">
-              {Object.values(doc.nodes).map((node) => {
-                const pLayout = layouts[node.id];
-                if (!pLayout || node.collapsed) return null;
-                return node.childrenIds.map((cid) => {
-                  const cLayout = layouts[cid];
-                  if (!cLayout) return null;
-                  const path = buildConnectorPath(pLayout, cLayout, doc.connectorStyle, doc.layout);
-                  return (
-                    <path
-                      key={`${node.id}-${cid}`}
-                      d={path}
-                      fill="none"
-                      stroke={cLayout.branchColor}
-                      strokeWidth={Math.max(1.8, 3.2 - cLayout.depth * 0.4)}
-                      strokeLinecap="round"
-                    />
-                  );
-                });
-              })}
-              {renderCrossLinkSvgLayer("behind")}
-            </svg>
-
-            {Object.values(layouts).map((info: LayoutNodeInfo) => {
-              const node = doc.nodes[info.id];
-              if (!node) return null;
-              return (
-                <MindMapNodeCard
-                  key={node.id}
-                  node={node}
-                  layout={info}
-                  colorMode={doc.colorMode || "colorful"}
-                  zoomScale={viewport.scale}
-                  isSelected={selectedIds.includes(node.id)}
-                  isEditing={editingId === node.id}
-                  isCrossLinkSource={crossLinkSourceId === node.id}
-                  isDragging={dragState?.nodeId === node.id}
-                  dragOffset={
-                    dragState?.nodeId === node.id
-                      ? { dx: dragState.dx, dy: dragState.dy }
-                      : null
-                  }
-                  onSelect={handleSelectNode}
-                  onStartEdit={setEditingId}
-                  onCommitEdit={(id, nextText) => {
-                    setEditingId(null);
-                    const cur = doc.nodes[id];
-                    if (cur && cur.text !== nextText) {
-                      const nextDoc = updateNodesStyle(doc, [id], (n) => {
-                        n.text = nextText;
-                      });
-                      if (doc.rootIds[0] === id) {
-                        nextDoc.title = nextText.split("\n")[0].replace(/[*#`]/g, "").trim() || nextDoc.title;
-                      }
-                      commitDoc(nextDoc);
-                    }
-                  }}
-                  onCancelEdit={() => setEditingId(null)}
-                  onUpdateNodeTextDirect={(id, nextText) => {
-                    commitDoc(
-                      updateNodesStyle(doc, [id], (n) => {
-                        n.text = nextText;
-                      })
-                    );
-                  }}
-                  onToggleCollapse={(id) => commitDoc(toggleCollapseNode(doc, id), false)}
-                  onAddChildQuick={(parentId) => {
-                    const { doc: next, newId } = addChildNode(doc, parentId);
-                    commitDoc(next);
-                    setSelectedIds([newId]);
-                    setEditingId(newId);
-                  }}
-                  onResizeNode={(nodeId, dims) => {
-                    commitDoc(resizeNodesBatch(doc, [nodeId], dims), false);
-                  }}
-                  onOpenImageLightbox={setLightboxImage}
-                  onResizeImage={(nodeId, imgId, width) => {
-                    commitDoc(
-                      updateNodesStyle(doc, [nodeId], (n) => {
-                        n.images = (n.images || []).map((img) =>
-                          img.id === imgId ? { ...img, width } : img
-                        );
-                      }),
-                      false
-                    );
-                  }}
-                  onUpdateImageProps={(nodeId, imgId, patch) => {
-                    commitDoc(
-                      updateNodesStyle(doc, [nodeId], (n) => {
-                        n.images = (n.images || []).map((img) =>
-                          img.id === imgId ? { ...img, ...patch } : img
-                        );
-                      })
-                    );
-                  }}
-                  onRemoveImage={(nodeId, imgId) => {
-                    commitDoc(
-                      updateNodesStyle(doc, [nodeId], (n) => {
-                        n.images = (n.images || []).filter((img) => img.id !== imgId);
-                      })
-                    );
-                    announce("Removed photo from node");
-                  }}
-                  onDropFilesOnNode={attachFilesToNode}
-                  onPasteImageInEditor={async (nodeId, file) => {
-                    await attachFilesToNode(nodeId, [file]);
-                  }}
-                  onOpenDrawer={(id) => {
-                    setSelectedIds([id]);
-                    setDrawerOpen(true);
-                  }}
-                  onSizeChange={handleSizeChange}
-                  onAnnounce={announce}
-                  onDragNodeStart={handleDragNodeStart}
-                />
-              );
-            })}
-
-            {dragDropHint && (
-              <div
-                className={
-                  dragDropHint.indicator.kind === "line"
-                    ? "mf-drop-indicator-line"
-                    : "mf-drop-indicator-box"
-                }
-                style={{
-                  transform: `translate(${dragDropHint.indicator.x}px, ${dragDropHint.indicator.y}px)`,
-                  width: `${dragDropHint.indicator.width}px`,
-                  height: `${dragDropHint.indicator.height}px`,
-                }}
-              >
-                {dragDropHint.indicator.label && (
-                  <span className="mf-drop-indicator-badge">
-                    {dragDropHint.indicator.label}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Front SVG layer: cross-link lines layered above all node cards */}
-            <svg className="mf-svg-layer mf-svg-crosslinks">
-              {renderCrossLinkSvgLayer("above")}
-            </svg>
+            {canvasWorldContent}
           </div>
 
           {crossLinkSourceId && doc.nodes[crossLinkSourceId] && (
@@ -2142,6 +2324,7 @@ export function App() {
                 .filter((n): n is MindMapNode => Boolean(n))}
               totalVisibleCount={Object.keys(layouts).length}
               anchorLayout={layouts[primarySelectedId]}
+              colorMode={doc.colorMode || "colorful"}
               viewport={viewport}
               containerRect={containerRect}
               onClearMultiSelect={() => setSelectedIds([primarySelectedId])}
@@ -2299,87 +2482,120 @@ export function App() {
       </div>
 
       {/* Floating Style Popover (Shift+Space) */}
-      {stylePopoverOpen && (
-        <div className="mf-floating-popover" role="region" aria-label="Node color and shape">
-          <div style={{ fontWeight: 650, fontSize: "0.86rem" }}>Node Style (Shift + Space)</div>
-          <div className="mf-swatch-grid">
-            {NODE_COLOR_SWATCHES.map((swatch) => (
-              <button
-                key={swatch}
-                type="button"
-                className="mf-swatch"
-                aria-label={`Set color ${swatch}`}
-                style={{ background: swatch }}
-                onClick={() =>
-                  commitDoc(
-                    setNodesColor(doc, selectedIds, {
-                      color: swatch,
-                      borderColor: swatch,
-                      textColor: getContrastTextColor(swatch),
-                    })
-                  )
-                }
-              />
-            ))}
-          </div>
-          <div className="mf-color-inputs-row">
-            <label>
-              <span>Fill</span>
-              <input
-                type="color"
-                value={primaryNode?.style?.color || layouts[primarySelectedId]?.branchColor || "#2563eb"}
-                onChange={(e) =>
-                  commitDoc(
-                    setNodesColor(doc, selectedIds, {
-                      color: e.target.value,
-                      textColor: getContrastTextColor(e.target.value),
-                    })
-                  )
-                }
-              />
-            </label>
-            <label>
-              <span>Border</span>
-              <input
-                type="color"
-                value={primaryNode?.style?.borderColor || layouts[primarySelectedId]?.branchColor || "#2563eb"}
-                onChange={(e) =>
-                  commitDoc(setNodesColor(doc, selectedIds, { borderColor: e.target.value }))
-                }
-              />
-            </label>
-            <label>
-              <span>Text</span>
-              <input
-                type="color"
-                value={primaryNode?.style?.textColor || "#0f172a"}
-                onChange={(e) =>
-                  commitDoc(setNodesColor(doc, selectedIds, { textColor: e.target.value }))
-                }
-              />
-            </label>
-            <button
-              type="button"
-              className="mf-chip-btn"
-              onClick={() => commitDoc(resetNodesColor(doc, selectedIds))}
-            >
-              Auto
-            </button>
-          </div>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-            {(["rounded", "card", "underline", "cloud"] as NodeShape[]).map((sh) => (
-              <button
-                key={sh}
-                type="button"
-                className="mf-chip-btn"
-                onClick={() => commitDoc(setNodesShape(doc, selectedIds, sh))}
-              >
-                {sh}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {stylePopoverOpen &&
+        (() => {
+          const useCustom = doc.colorMode === "custom";
+          const isPrimaryRoot = primaryNode?.parentId === null;
+          const rawStyleFill = primaryNode?.style?.color;
+          const isNoFillActive =
+            (useCustom && rawStyleFill === "none") ||
+            (!isPrimaryRoot && (!useCustom || !rawStyleFill));
+          const safeFillInput =
+            !isNoFillActive &&
+            rawStyleFill &&
+            rawStyleFill !== "none" &&
+            /^#[0-9a-f]{6}$/i.test(rawStyleFill)
+              ? rawStyleFill
+              : layouts[primarySelectedId]?.branchColor || "#2563eb";
+          const rawBorder =
+            primaryNode?.style?.borderColor ||
+            layouts[primarySelectedId]?.branchColor ||
+            "#2563eb";
+          const safeBorderInput = /^#[0-9a-f]{6}$/i.test(rawBorder) ? rawBorder : "#2563eb";
+          return (
+            <div className="mf-floating-popover" role="region" aria-label="Node color and shape">
+              <div style={{ fontWeight: 650, fontSize: "0.86rem" }}>Node Style (Shift + Space)</div>
+              <div className="mf-swatch-grid mf-swatch-grid-fill">
+                <button
+                  type="button"
+                  className={`mf-swatch mf-swatch-no-fill ${isNoFillActive ? "is-selected" : ""}`}
+                  aria-label="No fill"
+                  aria-pressed={isNoFillActive}
+                  title="No fill"
+                  onClick={() => commitDoc(setNodesColor(doc, selectedIds, { color: "none" }))}
+                />
+                {NODE_COLOR_SWATCHES.map((swatch) => (
+                  <button
+                    key={swatch}
+                    type="button"
+                    className={`mf-swatch ${
+                      !isNoFillActive && rawStyleFill?.toLowerCase() === swatch.toLowerCase()
+                        ? "is-selected"
+                        : ""
+                    }`}
+                    aria-label={`Set color ${swatch}`}
+                    style={{ background: swatch }}
+                    onClick={() =>
+                      commitDoc(
+                        setNodesColor(doc, selectedIds, {
+                          color: swatch,
+                          borderColor: swatch,
+                          textColor: getContrastTextColor(swatch),
+                        })
+                      )
+                    }
+                  />
+                ))}
+              </div>
+              <div className="mf-color-inputs-row">
+                <label>
+                  <span>Fill</span>
+                  <input
+                    type="color"
+                    value={safeFillInput}
+                    onChange={(e) =>
+                      commitDoc(
+                        setNodesColor(doc, selectedIds, {
+                          color: e.target.value,
+                          textColor: getContrastTextColor(e.target.value),
+                        })
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Border</span>
+                  <input
+                    type="color"
+                    value={safeBorderInput}
+                    onChange={(e) =>
+                      commitDoc(setNodesColor(doc, selectedIds, { borderColor: e.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Text</span>
+                  <input
+                    type="color"
+                    value={primaryNode?.style?.textColor || "#0f172a"}
+                    onChange={(e) =>
+                      commitDoc(setNodesColor(doc, selectedIds, { textColor: e.target.value }))
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="mf-chip-btn"
+                  onClick={() => commitDoc(resetNodesColor(doc, selectedIds))}
+                >
+                  Auto
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                {(["rounded", "card", "underline", "cloud"] as NodeShape[]).map((sh) => (
+                  <button
+                    key={sh}
+                    type="button"
+                    className="mf-chip-btn"
+                    onClick={() => commitDoc(setNodesShape(doc, selectedIds, sh))}
+                  >
+                    {sh}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
       {/* Floating Stickers Popover (Shift+S) */}
       {stickerPopoverOpen && (

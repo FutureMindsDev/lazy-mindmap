@@ -724,6 +724,7 @@ button svg[class*="lucide-chevron"] {
   position: relative;
   flex: 1;
   overflow: hidden;
+  contain: layout style paint;
   background-color: var(--bg-canvas);
   background-image: radial-gradient(circle, var(--dot-color) 1px, transparent 1px);
   background-size: 24px 24px;
@@ -782,6 +783,10 @@ button svg[class*="lucide-chevron"] {
   will-change: transform;
 }
 
+.mf-canvas-viewport.is-panning .mf-canvas-world {
+  pointer-events: none;
+}
+
 .mf-svg-layer {
   position: absolute;
   overflow: visible;
@@ -830,6 +835,7 @@ button svg[class*="lucide-chevron"] {
 .mf-node {
   position: absolute;
   z-index: 5;
+  contain: layout style;
   min-width: 120px;
   max-width: 460px;
   background: var(--bg-surface);
@@ -1547,6 +1553,10 @@ button svg[class*="lucide-chevron"] {
   margin: 8px 0;
 }
 
+.mf-swatch-grid-fill {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 .mf-swatch {
   height: 26px;
   border-radius: 6px;
@@ -1556,6 +1566,30 @@ button svg[class*="lucide-chevron"] {
 
 .mf-swatch:hover {
   transform: scale(1.06);
+}
+
+.mf-swatch.is-selected {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+.mf-swatch-no-fill {
+  position: relative;
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--border-color);
+  overflow: hidden;
+}
+
+.mf-swatch-no-fill::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 140%;
+  height: 2px;
+  background: #ef4444;
+  transform: translate(-50%, -50%) rotate(-32deg);
+  pointer-events: none;
 }
 
 .mf-swatch-picker {
@@ -1806,6 +1840,26 @@ button svg[class*="lucide-chevron"] {
   width: 16px;
   height: 16px;
   border-radius: 5px;
+}
+
+.mf-color-dot.is-no-fill {
+  position: relative;
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(255, 255, 255, 0.34);
+  opacity: 0.65;
+  overflow: hidden;
+}
+
+.mf-color-dot.is-no-fill::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 145%;
+  height: 1.8px;
+  background: #ef4444;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  pointer-events: none;
 }
 
 .mf-edge-color-line {

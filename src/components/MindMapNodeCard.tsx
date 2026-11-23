@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -24,7 +25,7 @@ interface MindMapNodeCardProps {
   node: MindMapNode;
   layout: LayoutNodeInfo;
   colorMode?: ColorMode;
-  zoomScale: number;
+  getZoomScale: () => number;
   isSelected: boolean;
   isEditing: boolean;
   isCrossLinkSource: boolean;
@@ -61,11 +62,11 @@ function isInsideUnclosedBlock(text: string, cursorPos: number): boolean {
 
 const DEFAULT_PLACEHOLDER_TEXTS = new Set(["New Idea", "New Sibling", "Floating Topic"]);
 
-export function MindMapNodeCard({
+export const MindMapNodeCard = memo(function MindMapNodeCard({
   node,
   layout,
   colorMode = "colorful",
-  zoomScale,
+  getZoomScale,
   isSelected,
   isEditing,
   isCrossLinkSource,
@@ -164,12 +165,17 @@ export function MindMapNodeCard({
     customStyle.minHeight = `${node.style.minHeight}px`;
   }
 
-  if (isRoot && (!useCustomColors || !node.style?.color)) {
+  const hasCustomFill = Boolean(
+    useCustomColors && node.style?.color && node.style.color !== "none"
+  );
+  const hasExplicitNoFill = Boolean(useCustomColors && node.style?.color === "none");
+
+  if (isRoot && !hasCustomFill && !hasExplicitNoFill) {
     customStyle.background = layout.branchColor;
     customStyle.color =
       (useCustomColors ? node.style?.textColor : undefined) ||
       getContrastTextColor(layout.branchColor);
-  } else if (useCustomColors && node.style?.color) {
+  } else if (hasCustomFill && node.style?.color) {
     customStyle.background = node.style.color;
     customStyle.color = node.style.textColor || getContrastTextColor(node.style.color);
   } else if (useCustomColors && node.style?.textColor) {
@@ -340,7 +346,8 @@ export function MindMapNodeCard({
     const startX = e.clientX;
     const startW = img.width || 180;
     const onMove = (moveEv: globalThis.MouseEvent) => {
-      const delta = (moveEv.clientX - startX) / Math.max(0.2, zoomScale);
+      const scale = Math.max(0.2, getZoomScale());
+      const delta = (moveEv.clientX - startX) / scale;
       const nextW = Math.max(64, Math.min(700, Math.round(startW + delta)));
       onResizeImage(node.id, img.id, nextW);
     };
@@ -362,8 +369,9 @@ export function MindMapNodeCard({
     const startH = el ? el.offsetHeight : layout.height;
 
     const onMove = (moveEv: globalThis.MouseEvent) => {
-      const dx = (moveEv.clientX - startX) / Math.max(0.2, zoomScale);
-      const dy = (moveEv.clientY - startY) / Math.max(0.2, zoomScale);
+      const scale = Math.max(0.2, getZoomScale());
+      const dx = (moveEv.clientX - startX) / scale;
+      const dy = (moveEv.clientY - startY) / scale;
       const patch: { width?: number; minHeight?: number } = {};
       if (axes === "e" || axes === "se") {
         patch.width = Math.max(120, Math.min(860, Math.round(startW + dx)));
@@ -773,4 +781,4 @@ export function MindMapNodeCard({
       )}
     </div>
   );
-}
+});

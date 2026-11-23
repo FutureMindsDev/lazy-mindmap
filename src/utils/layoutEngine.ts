@@ -13,6 +13,7 @@ export type SizeMap = Record<string, { width: number; height: number }>;
 export const DEFAULT_HORIZONTAL_GAP = 80;
 export const MIN_HORIZONTAL_GAP = 36;
 export const MAX_HORIZONTAL_GAP = 260;
+export const ROOT_TREE_GAP = 64;
 const V_GAP = 22;
 const ROOT_GAP_Y = 96;
 
@@ -104,6 +105,160 @@ function measureSubtreeSpanVertical(
   return Math.max(selfSize.width, childrenTotal);
 }
 
+interface TreeBox {
+  rootId: string;
+  nodeIds: string[];
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function boxesOverlap(
+  a: { minX: number; minY: number; maxX: number; maxY: number },
+  b: { minX: number; minY: number; maxX: number; maxY: number },
+  pad: number
+): boolean {
+  return (
+    a.minX < b.maxX + pad &&
+    a.maxX + pad > b.minX &&
+    a.minY < b.maxY + pad &&
+    a.maxY + pad > b.minY
+  );
+}
+
+/**
+ * Automatically shifts subsequent detached root trees so separate mind maps
+ * never overlap each other as trees grow, change layout, or get dragged nearby.
+ */
+export function resolveOverlappingRootTrees(
+  rootIds: string[],
+  result: Record<string, LayoutNodeInfo>,
+  gap = ROOT_TREE_GAP
+): void {
+  if (rootIds.length <= 1) return;
+
+  const byRoot = new Map<string, LayoutNodeInfo[]>();
+  for (const info of Object.values(result)) {
+    const list = byRoot.get(info.rootId);
+    if (list) list.push(info);
+    else byRoot.set(info.rootId, [info]);
+  }
+
+  const trees: TreeBox[] = [];
+  for (const rootId of rootIds) {
+    const nodes = byRoot.get(rootId);
+    if (!nodes || nodes.length === 0) continue;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const nodeIds: string[] = [];
+    for (const n of nodes) {
+      nodeIds.push(n.id);
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x + n.width > maxX) maxX = n.x + n.width;
+      if (n.y + n.height > maxY) maxY = n.y + n.height;
+    }
+    trees.push({ rootId, nodeIds, minX, minY, maxX, maxY });
+  }
+
+  if (trees.length <= 1) return;
+
+  const placedBoxes: TreeBox[] = [trees[0]];
+
+  const commitShift = (tree: TreeBox, dx: number, dy: number) => {
+    if (dx !== 0 || dy !== 0) {
+      for (const nid of tree.nodeIds) {
+        const info = result[nid];
+        if (info) {
+          info.x += dx;
+          info.y += dy;
+        }
+      }
+    }
+    placedBoxes.push({
+      rootId: tree.rootId,
+      nodeIds: tree.nodeIds,
+      minX: tree.minX + dx,
+      minY: tree.minY + dy,
+      maxX: tree.maxX + dx,
+      maxY: tree.maxY + dy,
+    });
+  };
+
+  for (let i = 1; i < trees.length; i++) {
+    const tree = trees[i];
+    if (!placedBoxes.some((p) => boxesOverlap(tree, p, gap))) {
+      placedBoxes.push(tree);
+      continue;
+    }
+
+    const queue: Array<{ dx: number; dy: number; cost: number }> = [{ dx: 0, dy: 0, cost: 0 }];
+    const visited = new Set<string>(["0,0"]);
+    let resolved = false;
+    let pops = 0;
+
+    while (queue.length > 0 && pops < 128) {
+      let bestIdx = 0;
+      for (let q = 1; q < queue.length; q++) {
+        if (queue[q].cost < queue[bestIdx].cost) {
+          bestIdx = q;
+        }
+      }
+      const cur = queue.splice(bestIdx, 1)[0];
+      pops++;
+
+      const shifted = {
+        minX: tree.minX + cur.dx,
+        maxX: tree.maxX + cur.dx,
+        minY: tree.minY + cur.dy,
+        maxY: tree.maxY + cur.dy,
+      };
+      const blocker = placedBoxes.find((p) => boxesOverlap(shifted, p, gap));
+      if (!blocker) {
+        commitShift(tree, cur.dx, cur.dy);
+        resolved = true;
+        break;
+      }
+
+      const downDy = blocker.maxY + gap - tree.minY;
+      const rightDx = blocker.maxX + gap - tree.minX;
+      const upDy = blocker.minY - gap - tree.maxY;
+      const leftDx = blocker.minX - gap - tree.maxX;
+
+      const rawEscapes: Array<[number, number, number]> = [
+        [cur.dx, tree.minY + downDy < blocker.maxY + gap ? downDy + 1e-6 : downDy, 0],
+        [tree.minX + rightDx < blocker.maxX + gap ? rightDx + 1e-6 : rightDx, cur.dy, 0.01],
+        [cur.dx, tree.maxY + upDy > blocker.minY - gap ? upDy - 1e-6 : upDy, 0.02],
+        [tree.maxX + leftDx > blocker.minX - gap ? leftDx - 1e-6 : leftDx, cur.dy, 0.03],
+      ];
+
+      for (const [candDx, candDy, tieBreak] of rawEscapes) {
+        const key = `${Math.round(candDx)},${Math.round(candDy)}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        queue.push({
+          dx: candDx,
+          dy: candDy,
+          cost: Math.hypot(candDx, candDy) + tieBreak,
+        });
+      }
+    }
+
+    if (!resolved) {
+      const maxPlacedY = Math.max(...placedBoxes.map((b) => b.maxY));
+      const fallbackDy = maxPlacedY + gap - tree.minY;
+      commitShift(
+        tree,
+        0,
+        tree.minY + fallbackDy < maxPlacedY + gap ? fallbackDy + 1e-6 : fallbackDy
+      );
+    }
+  }
+}
+
 export function computeMindMapLayout(
   doc: MindMapDocument,
   measuredSizes?: SizeMap,
@@ -134,12 +289,14 @@ export function computeMindMapLayout(
     const rootX = rootCenterX - rootSize.width / 2;
     const rootY = rootCenterY - rootSize.height / 2;
 
+    const rootCustomFill =
+      root.style?.color && root.style.color !== "none" ? root.style.color : undefined;
     const rootBranchColor =
       colorMode === "contrast"
         ? contrastColor
         : colorMode === "colorful"
         ? theme.rootBg
-        : root.style?.edgeColor || root.style?.borderColor || root.style?.color || theme.rootBg;
+        : root.style?.edgeColor || root.style?.borderColor || rootCustomFill || theme.rootBg;
 
     result[rootId] = {
       id: rootId,
@@ -164,12 +321,14 @@ export function computeMindMapLayout(
         branchColor: string
       ) => {
         const size = estimateNodeSize(node, measuredSizes);
+        const customFillAsBranch =
+          node.style?.color && node.style.color !== "none" ? node.style.color : undefined;
         const resolvedColor =
           colorMode === "contrast"
             ? contrastColor
             : colorMode === "colorful"
             ? branchColor
-            : node.style?.edgeColor || node.style?.borderColor || node.style?.color || branchColor;
+            : node.style?.edgeColor || node.style?.borderColor || customFillAsBranch || branchColor;
 
         if (node.id !== rootId) {
           result[node.id] = {
@@ -233,12 +392,14 @@ export function computeMindMapLayout(
           const size = estimateNodeSize(node, measuredSizes);
           const x = direction === "right" ? edgeX : edgeX - size.width;
           const y = centerY - size.height / 2;
+          const customFillAsBranch =
+            node.style?.color && node.style.color !== "none" ? node.style.color : undefined;
           const resolvedColor =
             colorMode === "contrast"
               ? contrastColor
               : colorMode === "colorful"
               ? branchColor
-              : node.style?.edgeColor || node.style?.borderColor || node.style?.color || branchColor;
+              : node.style?.edgeColor || node.style?.borderColor || customFillAsBranch || branchColor;
 
           result[node.id] = {
             id: node.id,
@@ -314,6 +475,10 @@ export function computeMindMapLayout(
     }
     nextDetachedRootY = Math.max(nextDetachedRootY, maxY + ROOT_GAP_Y);
   });
+
+  if (doc.rootIds.length > 1) {
+    resolveOverlappingRootTrees(doc.rootIds, result, ROOT_TREE_GAP);
+  }
 
   return result;
 }

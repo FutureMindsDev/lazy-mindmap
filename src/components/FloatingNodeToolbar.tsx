@@ -31,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  ColorMode,
   LayoutNodeInfo,
   MindMapNode,
   NodeAlign,
@@ -45,6 +46,7 @@ interface FloatingNodeToolbarProps {
   selectedNodes: MindMapNode[];
   totalVisibleCount: number;
   anchorLayout: LayoutNodeInfo | undefined;
+  colorMode?: ColorMode;
   viewport: { x: number; y: number; scale: number };
   containerRect: { width: number; height: number };
   onClearMultiSelect: () => void;
@@ -58,7 +60,12 @@ interface FloatingNodeToolbarProps {
     canMoveRight: boolean;
   };
   onMoveNode: (direction: "up" | "down" | "left" | "right") => void;
-  onSetColors: (colors: { color?: string; borderColor?: string; edgeColor?: string; textColor?: string }) => void;
+  onSetColors: (colors: {
+    color?: string;
+    borderColor?: string;
+    edgeColor?: string;
+    textColor?: string | null;
+  }) => void;
   onResetColors: () => void;
   onSetFontSize: (size: number | "reset") => void;
   onAdjustFontSize: (mode: "inc" | "dec") => void;
@@ -85,6 +92,7 @@ export function FloatingNodeToolbar({
   selectedNodes,
   totalVisibleCount,
   anchorLayout,
+  colorMode = "colorful",
   viewport,
   containerRect,
   onClearMultiSelect,
@@ -123,9 +131,21 @@ export function FloatingNodeToolbar({
   const primary = selectedNodes[0];
   const isMulti = selectedNodes.length > 1;
   const isAll = isMulti && selectedNodes.length >= totalVisibleCount;
-  const currentFill = primary?.style?.color || anchorLayout?.branchColor || "#2563eb";
-  const currentBorder = primary?.style?.borderColor || anchorLayout?.branchColor || "#2563eb";
+  const isRoot = primary?.parentId === null;
+  const useCustomColors = colorMode === "custom";
+  const rawCustomFill = primary?.style?.color;
+  const hasExplicitNoFill = useCustomColors && rawCustomFill === "none";
+  const effectiveFill: string | null = hasExplicitNoFill
+    ? null
+    : useCustomColors && rawCustomFill
+    ? rawCustomFill
+    : isRoot
+    ? anchorLayout?.branchColor || "#2563eb"
+    : null;
+  const pickerFillValue =
+    effectiveFill && /^#[0-9a-f]{6}$/i.test(effectiveFill) ? effectiveFill : "#2563eb";
   const currentEdge = primary?.style?.edgeColor || anchorLayout?.branchColor || "#2563eb";
+  const pickerEdgeValue = /^#[0-9a-f]{6}$/i.test(currentEdge) ? currentEdge : "#2563eb";
   const currentFont = primary?.style?.fontSize ?? (primary?.parentId === null ? 16 : 14);
   const currentShape = primary?.style?.shape || "rounded";
 
@@ -303,14 +323,14 @@ export function FloatingNodeToolbar({
           <button
             type="button"
             className="mf-ctx-btn"
-            aria-label="Node color picker"
+            aria-label={effectiveFill ? "Node fill color picker" : "Node fill color picker (No fill)"}
             aria-expanded={panel === "color"}
-            title="Choose node fill, border & text color"
+            title={effectiveFill ? "Choose node fill color" : "Node fill color (No fill)"}
             onClick={() => togglePanel("color")}
           >
             <span
-              className="mf-color-dot mf-color-dot-solo"
-              style={{ background: currentFill, borderColor: currentBorder }}
+              className={`mf-color-dot mf-color-dot-solo ${effectiveFill ? "" : "is-no-fill"}`}
+              style={effectiveFill ? { background: effectiveFill } : undefined}
             />
           </button>
           <button
@@ -530,13 +550,13 @@ export function FloatingNodeToolbar({
             </button>
           </div>
 
-          <div className="mf-swatch-grid">
+          <div className="mf-swatch-grid mf-swatch-grid-fill">
             <label className="mf-swatch mf-swatch-picker" title="Custom color">
               <Pipette size={14} aria-hidden="true" />
               <input
                 type="color"
                 aria-label="Custom fill color"
-                value={currentFill}
+                value={pickerFillValue}
                 onChange={(e) =>
                   onSetColors({
                     color: e.target.value,
@@ -545,11 +565,21 @@ export function FloatingNodeToolbar({
                 }
               />
             </label>
+            <button
+              type="button"
+              className={`mf-swatch mf-swatch-no-fill ${!effectiveFill ? "is-selected" : ""}`}
+              aria-label="No fill"
+              aria-pressed={!effectiveFill}
+              title="No fill"
+              onClick={() => onSetColors({ color: "none" })}
+            />
             {NODE_PALETTE_SWATCHES.map((swatch) => (
               <button
                 key={swatch}
                 type="button"
-                className="mf-swatch"
+                className={`mf-swatch ${
+                  effectiveFill?.toLowerCase() === swatch.toLowerCase() ? "is-selected" : ""
+                }`}
                 aria-label={`Fill color ${swatch}`}
                 style={{ background: swatch }}
                 onClick={() =>
@@ -589,7 +619,7 @@ export function FloatingNodeToolbar({
               <input
                 type="color"
                 aria-label="Custom border and edge color"
-                value={currentEdge}
+                value={pickerEdgeValue}
                 onChange={(e) => {
                   const v = e.target.value;
                   onSetColors({ edgeColor: v, borderColor: v });
