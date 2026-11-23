@@ -62,7 +62,7 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
   - `.mf-node` (`z-index: 5`, `15` selected, `25` editing): Node cards.
   - `.mf-svg-crosslinks` (`z-index: 32`): Cross-links set to `layer: "above"` (default) and `.mf-crosslink-label` text sit above all nodes with a surface-color stroke halo.
 - **Horizontal Edge Spacing:** `doc.horizontalGap` defaults to `80` in `src/utils/layoutEngine.ts` (min `36`, max `260`).
-- **Zoom Gesture Sensitivity:** `Ctrl+Scroll` / trackpad pinch zoom in `src/App.tsx` must remain smoothly damped (`Math.exp(-clampedDelta * 0.0022)` with clamped delta), never fixed large step jumps per event.
+- **Zoom Gesture Sensitivity:** `Ctrl+Scroll` / trackpad pinch zoom in `src/App.tsx` must remain smoothly damped (`Math.exp(-clampedDelta * 0.0033)` with clamped delta), never fixed large step jumps per event.
 - **Undo / Redo & Bottom HUD Level Expansion:**
   - Node expand/collapse actions are excluded from undo/redo history, and undo/redo preserve the current collapse state across shared node IDs.
   - The bottom-left HUD provides an `Expand Level` hover/focus menu above the button listing `Level 1`..`Level N` plus `Expand all` (with no separate `Expand All` button).
