@@ -1,0 +1,14 @@
+services:
+  mindforge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mindforge-web
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
