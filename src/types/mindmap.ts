@@ -148,3 +148,11 @@ export interface LlmChatMessage {
   affectedNodes?: LlmNodeChangeRecord[];
   rawError?: string;
 }
+
+export interface LlmConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: LlmChatMessage[];
+}

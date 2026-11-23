@@ -2,6 +2,7 @@ import type {
   LlmChatFile,
   LlmChatMessage,
   LlmConfig,
+  LlmConversation,
   LlmNodeChangeRecord,
   LlmProviderId,
   MindMapDocument,
@@ -13,6 +14,8 @@ import { cloneDocument, insertSubtreeBranches, makeId } from "./treeOps";
 
 export const LLM_CONFIG_STORAGE_KEY = "mindforge:llmConfig";
 export const LLM_HISTORY_STORAGE_KEY = "mindforge:llmChatHistory";
+export const LLM_CONVERSATIONS_STORAGE_KEY = "mindforge:llmConversations";
+export const LLM_ACTIVE_CONV_STORAGE_KEY = "mindforge:llmActiveConversationId";
 
 export const LLM_PROVIDER_META: Record<
   LlmProviderId,
@@ -130,6 +133,100 @@ export function saveLlmChatHistory(messages: LlmChatMessage[]): void {
     localStorage.setItem(LLM_HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
   } catch {
     // Ignore storage quota errors
+  }
+}
+
+export function deriveConversationTitle(messages: LlmChatMessage[]): string {
+  const firstUser = messages.find((m) => m.role === "user" && m.content.trim());
+  if (!firstUser) return "New Conversation";
+  const singleLine = firstUser.content
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[*#`~>\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!singleLine) return "New Conversation";
+  return singleLine.length > 42 ? `${singleLine.slice(0, 39)}…` : singleLine;
+}
+
+export function createNewConversation(initialMessages: LlmChatMessage[] = []): LlmConversation {
+  const now = new Date().toISOString();
+  return {
+    id: makeId("conv"),
+    title: deriveConversationTitle(initialMessages),
+    createdAt: initialMessages[0]?.createdAt || now,
+    updatedAt: initialMessages[initialMessages.length - 1]?.createdAt || now,
+    messages: initialMessages,
+  };
+}
+
+export function saveLlmConversations(conversations: LlmConversation[]): void {
+  try {
+    const sanitized = conversations.slice(0, 50).map((conv) => ({
+      ...conv,
+      messages: conv.messages.slice(-80).map((m) => ({
+        ...m,
+        files: m.files?.map((f) => ({
+          id: f.id,
+          name: f.name,
+          url: f.url,
+          mimeType: f.mimeType,
+          size: f.size,
+          textContent:
+            f.textContent && f.textContent.length > 4000
+              ? f.textContent.slice(0, 4000)
+              : f.textContent,
+        })),
+      })),
+    }));
+    localStorage.setItem(LLM_CONVERSATIONS_STORAGE_KEY, JSON.stringify(sanitized));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function loadLlmConversations(): LlmConversation[] {
+  try {
+    const raw = localStorage.getItem(LLM_CONVERSATIONS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const valid = (parsed as LlmConversation[]).filter(
+          (c) => c && typeof c.id === "string" && Array.isArray(c.messages)
+        );
+        if (valid.length > 0) return valid;
+      }
+    }
+  } catch {
+    // Fallback to legacy migration or fresh conversation
+  }
+
+  const legacy = loadLlmChatHistory();
+  if (legacy.length > 0) {
+    const migrated = [createNewConversation(legacy)];
+    saveLlmConversations(migrated);
+    return migrated;
+  }
+
+  return [createNewConversation()];
+}
+
+export function loadActiveConversationId(conversations: LlmConversation[]): string {
+  try {
+    const savedId = localStorage.getItem(LLM_ACTIVE_CONV_STORAGE_KEY);
+    if (savedId && conversations.some((c) => c.id === savedId)) {
+      return savedId;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return conversations[0]?.id || "";
+}
+
+export function saveActiveConversationId(id: string): void {
+  try {
+    localStorage.setItem(LLM_ACTIVE_CONV_STORAGE_KEY, id);
+  } catch {
+    // Ignore storage errors
   }
 }
 

@@ -2,9 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import { extractMarkdownFromHtml, renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   callLlmProvider,
+  createNewConversation,
+  deriveConversationTitle,
   findRelatedNodes,
+  LLM_CONVERSATIONS_STORAGE_KEY,
+  LLM_HISTORY_STORAGE_KEY,
   LlmApiError,
+  loadLlmConversations,
   parseAndApplyLlmResponse,
+  saveLlmConversations,
 } from "../utils/llmMindMapAgent";
 import { parseMarkdownToSubtree } from "../utils/markdownToSubtree";
 import { computeMindMapLayout } from "../utils/layoutEngine";
@@ -526,6 +532,80 @@ describe("LLM Mind Map Assistant Agent", () => {
       expect(err).toBeInstanceOf(LlmApiError);
       expect((err as LlmApiError).message).toBe("Incorrect API key provided: sk-bad");
       expect((err as LlmApiError).status).toBe(401);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("derives conversation titles, migrates legacy history, and persists conversations without heavy dataUrls", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+    });
+
+    try {
+      expect(deriveConversationTitle([])).toBe("New Conversation");
+      expect(
+        deriveConversationTitle([
+          {
+            id: "u1",
+            role: "user",
+            content: "# Add **Quantum Computing**\nwith `qubits` and gates for beginners and experts",
+            createdAt: "2026-11-24T00:00:00.000Z",
+          },
+        ])
+      ).toBe("Add Quantum Computing with qubits and g…");
+
+      // Legacy migration from mindforge:llmChatHistory
+      store.set(
+        LLM_HISTORY_STORAGE_KEY,
+        JSON.stringify([
+          {
+            id: "legacy-1",
+            role: "user",
+            content: "Summarize physics nodes",
+            createdAt: "2026-11-24T00:00:00.000Z",
+          },
+        ])
+      );
+      const migrated = loadLlmConversations();
+      expect(migrated).toHaveLength(1);
+      expect(migrated[0].title).toBe("Summarize physics nodes");
+      expect(migrated[0].messages).toHaveLength(1);
+
+      // Saving strips dataUrl blobs while retaining metadata
+      const conv = createNewConversation([
+        {
+          id: "m-file",
+          role: "user",
+          content: "Inspect PDF",
+          createdAt: "2026-11-24T00:01:00.000Z",
+          files: [
+            {
+              id: "f1",
+              name: "paper.pdf",
+              url: "/uploads/paper.pdf",
+              mimeType: "application/pdf",
+              size: 2048,
+              dataUrl: "data:application/pdf;base64,AAAA",
+            },
+          ],
+        },
+      ]);
+      saveLlmConversations([conv, ...migrated]);
+      const rawSaved = store.get(LLM_CONVERSATIONS_STORAGE_KEY);
+      expect(rawSaved).toBeDefined();
+      expect(rawSaved).not.toContain("data:application/pdf;base64,AAAA");
+
+      const reloaded = loadLlmConversations();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded[0].messages[0].files?.[0].name).toBe("paper.pdf");
     } finally {
       vi.unstubAllGlobals();
     }
