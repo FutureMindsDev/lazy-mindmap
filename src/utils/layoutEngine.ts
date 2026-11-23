@@ -439,10 +439,42 @@ export function wrapCrossLinkLabelLines(label: string, maxCharsPerLine = 42): st
   return lines;
 }
 
+export type CrossLinkAnchorSide = "left" | "right" | "top" | "bottom";
+
+export interface CrossLinkAnchorPoint {
+  x: number;
+  y: number;
+  side: CrossLinkAnchorSide;
+}
+
+export function getNodeEdgeMidpoint(
+  node: LayoutNodeInfo,
+  targetX: number,
+  targetY: number
+): CrossLinkAnchorPoint {
+  const ncx = node.x + node.width / 2;
+  const ncy = node.y + node.height / 2;
+  const dx = targetX - ncx;
+  const dy = targetY - ncy;
+  const halfW = Math.max(1, node.width / 2);
+  const halfH = Math.max(1, node.height / 2);
+
+  if (Math.abs(dx) / halfW >= Math.abs(dy) / halfH) {
+    return dx >= 0
+      ? { x: node.x + node.width, y: ncy, side: "right" }
+      : { x: node.x, y: ncy, side: "left" };
+  }
+  return dy >= 0
+    ? { x: ncx, y: node.y + node.height, side: "bottom" }
+    : { x: ncx, y: node.y, side: "top" };
+}
+
 export interface CrossLinkPathResult {
   path: string;
   labelX: number;
   labelY: number;
+  startPoint: CrossLinkAnchorPoint;
+  endPoint: CrossLinkAnchorPoint;
   relocated: boolean;
   forceLabelAbove: boolean;
 }
@@ -482,10 +514,18 @@ export function buildCrossLinkPath(
     layer?: CrossLinkLayer;
   }
 ): CrossLinkPathResult {
-  const fx = from.x + from.width / 2;
-  const fy = from.y + from.height / 2;
-  const tx = to.x + to.width / 2;
-  const ty = to.y + to.height / 2;
+  const fromCenterX = from.x + from.width / 2;
+  const fromCenterY = from.y + from.height / 2;
+  const toCenterX = to.x + to.width / 2;
+  const toCenterY = to.y + to.height / 2;
+
+  const startPoint = getNodeEdgeMidpoint(from, toCenterX, toCenterY);
+  const endPoint = getNodeEdgeMidpoint(to, fromCenterX, fromCenterY);
+
+  const fx = startPoint.x;
+  const fy = startPoint.y;
+  const tx = endPoint.x;
+  const ty = endPoint.y;
 
   const dx = tx - fx;
   const dy = ty - fy;
@@ -505,6 +545,8 @@ export function buildCrossLinkPath(
       path,
       labelX: midX,
       labelY: midY,
+      startPoint,
+      endPoint,
       relocated: false,
       forceLabelAbove: false,
     };
@@ -523,6 +565,8 @@ export function buildCrossLinkPath(
       path,
       labelX: midX,
       labelY: midY,
+      startPoint,
+      endPoint,
       relocated: false,
       forceLabelAbove: false,
     };
@@ -661,6 +705,8 @@ export function buildCrossLinkPath(
       path,
       labelX: candidates[0].x,
       labelY: candidates[0].y,
+      startPoint,
+      endPoint,
       relocated: true,
       forceLabelAbove: false,
     };
@@ -672,6 +718,8 @@ export function buildCrossLinkPath(
     path,
     labelX: midX,
     labelY: midY,
+    startPoint,
+    endPoint,
     relocated: false,
     forceLabelAbove: true,
   };

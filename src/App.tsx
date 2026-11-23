@@ -19,6 +19,7 @@ import { useMindMupShortcuts } from "./hooks/useMindMupShortcuts";
 import type {
   CanvasTool,
   CrossLink,
+  CrossLinkHeadType,
   LayoutNodeInfo,
   MapSummary,
   MindMapDocument,
@@ -43,6 +44,7 @@ import {
   clampCrossLinkLabel,
   computeMindMapLayout,
   DEFAULT_HORIZONTAL_GAP,
+  getNodeEdgeMidpoint,
   wrapCrossLinkLabelLines,
   type SizeMap,
 } from "./utils/layoutEngine";
@@ -1563,6 +1565,63 @@ export function App() {
       );
     };
 
+    const renderCrossLinkMarker = (id: string, headType: CrossLinkHeadType, color: string) => {
+      if (headType === "none") return null;
+      if (headType === "circle-filled") {
+        return (
+          <marker
+            key={id}
+            id={id}
+            viewBox="0 0 10 10"
+            refX="8.2"
+            refY="5"
+            markerWidth="6.2"
+            markerHeight="6.2"
+            orient="auto-start-reverse"
+          >
+            <circle cx="5" cy="5" r="3.6" fill={color} />
+          </marker>
+        );
+      }
+      if (headType === "circle-outline") {
+        return (
+          <marker
+            key={id}
+            id={id}
+            viewBox="0 0 10 10"
+            refX="8.2"
+            refY="5"
+            markerWidth="6.5"
+            markerHeight="6.5"
+            orient="auto-start-reverse"
+          >
+            <circle
+              cx="5"
+              cy="5"
+              r="3.3"
+              fill="var(--bg-surface)"
+              stroke={color}
+              strokeWidth="1.8"
+            />
+          </marker>
+        );
+      }
+      return (
+        <marker
+          key={id}
+          id={id}
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="6.5"
+          markerHeight="6.5"
+          orient="auto-start-reverse"
+        >
+          <path d="M 0 1 L 10 5 L 0 9 z" fill={color} />
+        </marker>
+      );
+    };
+
     return (
       <>
         <defs>
@@ -1579,20 +1638,15 @@ export function App() {
               <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
             </marker>
           )}
-          {filtered.map((xl) => (
-            <marker
-              key={`marker-${xl.id}`}
-              id={`mf-xl-arrow-${xl.id}`}
-              viewBox="0 0 10 10"
-              refX="8"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 1 L 10 5 L 0 9 z" fill={xl.color || "#f59e0b"} />
-            </marker>
-          ))}
+          {filtered.flatMap((xl) => {
+            const color = xl.color || "#f59e0b";
+            const startHead = xl.startHead || "none";
+            const endHead = xl.endHead || "arrow";
+            return [
+              renderCrossLinkMarker(`mf-xl-start-${xl.id}`, startHead, color),
+              renderCrossLinkMarker(`mf-xl-end-${xl.id}`, endHead, color),
+            ];
+          })}
         </defs>
         {filtered.map((xl) => {
           const fromL = layouts[xl.fromId];
@@ -1606,6 +1660,8 @@ export function App() {
           });
           const color = xl.color || "#f59e0b";
           const isSelected = selectedCrossLinkId === xl.id && selectedIds.length === 0;
+          const startHead = xl.startHead || "none";
+          const endHead = xl.endHead || "arrow";
           const dashArray =
             xl.strokeStyle === "solid"
               ? undefined
@@ -1642,7 +1698,8 @@ export function App() {
                 strokeWidth={isSelected ? 2.8 : 2}
                 strokeDasharray={dashArray}
                 strokeLinecap="round"
-                markerEnd={`url(#mf-xl-arrow-${xl.id})`}
+                markerStart={startHead !== "none" ? `url(#mf-xl-start-${xl.id})` : undefined}
+                markerEnd={endHead !== "none" ? `url(#mf-xl-end-${xl.id})` : undefined}
               />
               {!forceLabelAbove && renderLabelText(xl, labelX, labelY, color, handlers)}
             </g>
@@ -1668,8 +1725,9 @@ export function App() {
           crossLinkPointer &&
           (() => {
             const src = layouts[crossLinkSourceId];
-            const sx = src.x + src.width / 2;
-            const sy = src.y + src.height / 2;
+            const startEdge = getNodeEdgeMidpoint(src, crossLinkPointer.x, crossLinkPointer.y);
+            const sx = startEdge.x;
+            const sy = startEdge.y;
             const tx = crossLinkPointer.x;
             const ty = crossLinkPointer.y;
             const dx = tx - sx;

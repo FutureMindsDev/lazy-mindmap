@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { BringToFront, Pencil, SendToBack, Trash2, X } from "lucide-react";
 import { useToolbarFocusGroup } from "../hooks/useToolbarFocusGroup";
-import type { CrossLink, CrossLinkLayer, CrossLinkStrokeStyle } from "../types/mindmap";
+import type {
+  CrossLink,
+  CrossLinkHeadType,
+  CrossLinkLayer,
+  CrossLinkStrokeStyle,
+} from "../types/mindmap";
 import {
   clampCrossLinkLabel,
   countSentences,
@@ -33,7 +38,7 @@ export function FloatingCrossLinkToolbar({
   onDeleteCrossLink,
   onDeselect,
 }: FloatingCrossLinkToolbarProps) {
-  const [activePopover, setActivePopover] = useState<"color" | "edit" | null>(
+  const [activePopover, setActivePopover] = useState<"color" | "edit" | "heads" | null>(
     initialEditOpen ? "edit" : null
   );
   const [labelDraft, setLabelDraft] = useState(crossLink.label || "");
@@ -47,6 +52,29 @@ export function FloatingCrossLinkToolbar({
   const currentColor = crossLink.color || "#f59e0b";
   const currentLayer: CrossLinkLayer = crossLink.layer || "above";
   const currentStyle: CrossLinkStrokeStyle = crossLink.strokeStyle || "dashed";
+  const startHead: CrossLinkHeadType = crossLink.startHead || "none";
+  const endHead: CrossLinkHeadType = crossLink.endHead || "arrow";
+  const isBothSides = startHead !== "none" && endHead !== "none";
+  const primaryHeadShape: Exclude<CrossLinkHeadType, "none"> =
+    endHead !== "none" ? endHead : startHead !== "none" ? startHead : "arrow";
+
+  const renderHeadGlyph = (side: "start" | "end", shape: CrossLinkHeadType) => {
+    if (shape === "none") return null;
+    if (shape === "arrow") {
+      return side === "start" ? (
+        <polygon points="1,5 7,2 7,8" fill="currentColor" />
+      ) : (
+        <polygon points="23,5 17,2 17,8" fill="currentColor" />
+      );
+    }
+    const cx = side === "start" ? 4.5 : 19.5;
+    if (shape === "circle-filled") {
+      return <circle cx={cx} cy="5" r="2.8" fill="currentColor" />;
+    }
+    return (
+      <circle cx={cx} cy="5" r="2.6" fill="#1f242d" stroke="currentColor" strokeWidth="1.6" />
+    );
+  };
 
   useEffect(() => {
     setLabelDraft(crossLink.label || "");
@@ -252,6 +280,35 @@ export function FloatingCrossLinkToolbar({
 
         <span role="separator" aria-orientation="vertical" className="mf-ctx-sep" />
 
+        {/* Arrowheads (Pointed / Circular Unfilled / Circular Filled, One / Both Sides) */}
+        <div role="group" aria-label="Arrowheads" className="mf-toolbar-group">
+          <button
+            type="button"
+            className="mf-ctx-btn"
+            aria-label="Cross-link arrowheads"
+            aria-expanded={activePopover === "heads"}
+            title="Choose arrowhead shape & one/both sides"
+            onClick={() => setActivePopover((o) => (o === "heads" ? null : "heads"))}
+          >
+            <svg width="24" height="10" viewBox="0 0 24 10" aria-hidden="true">
+              <line
+                x1={startHead === "none" ? 2 : 5}
+                y1="5"
+                x2={endHead === "none" ? 22 : 19}
+                y2="5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              {renderHeadGlyph("start", startHead)}
+              {renderHeadGlyph("end", endHead)}
+            </svg>
+            <span className="mf-ctx-label">{isBothSides ? "Both" : "1-Side"}</span>
+          </button>
+        </div>
+
+        <span role="separator" aria-orientation="vertical" className="mf-ctx-sep" />
+
         {/* Delete & Deselect */}
         <div role="group" aria-label="Cross-link actions" className="mf-toolbar-group">
           <button
@@ -331,6 +388,142 @@ export function FloatingCrossLinkToolbar({
                 Save
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {activePopover === "heads" && (
+        <div className="mf-ctx-popover" style={{ minWidth: 310 }}>
+          <div className="mf-ctx-popover-title">Arrowheads &amp; Sides</div>
+          <div className="mf-ctx-popover-sub">Sides</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            <button
+              type="button"
+              className={`mf-chip-btn ${!isBothSides && (startHead !== "none" || endHead !== "none") ? "is-active" : ""}`}
+              aria-pressed={!isBothSides && (startHead !== "none" || endHead !== "none")}
+              onClick={() =>
+                onUpdateCrossLink({
+                  startHead: "none",
+                  endHead: primaryHeadShape,
+                })
+              }
+            >
+              One Side
+            </button>
+            <button
+              type="button"
+              className={`mf-chip-btn ${isBothSides ? "is-active" : ""}`}
+              aria-pressed={isBothSides}
+              onClick={() =>
+                onUpdateCrossLink({
+                  startHead: primaryHeadShape,
+                  endHead: primaryHeadShape,
+                })
+              }
+            >
+              Both Sides
+            </button>
+          </div>
+
+          <div className="mf-ctx-popover-sub">Arrowhead Style</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {(
+              [
+                { id: "arrow", label: "Pointed Arrow" },
+                { id: "circle-outline", label: "Circular Unfilled" },
+                { id: "circle-filled", label: "Circular Filled" },
+              ] as const
+            ).map((opt) => {
+              const active =
+                (startHead !== "none" || endHead !== "none") && primaryHeadShape === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`mf-chip-btn ${active ? "is-active" : ""}`}
+                  aria-pressed={active}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+                  onClick={() => {
+                    if (isBothSides) {
+                      onUpdateCrossLink({ startHead: opt.id, endHead: opt.id });
+                    } else if (startHead !== "none" && endHead === "none") {
+                      onUpdateCrossLink({ startHead: opt.id, endHead: "none" });
+                    } else {
+                      onUpdateCrossLink({ startHead: "none", endHead: opt.id });
+                    }
+                  }}
+                >
+                  <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true">
+                    <line
+                      x1="1"
+                      y1="5"
+                      x2="13"
+                      y2="5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    {opt.id === "arrow" && <polygon points="17,5 11,2 11,8" fill="currentColor" />}
+                    {opt.id === "circle-filled" && <circle cx="14" cy="5" r="3" fill="currentColor" />}
+                    {opt.id === "circle-outline" && (
+                      <circle
+                        cx="14"
+                        cy="5"
+                        r="2.7"
+                        fill="var(--bg-surface)"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                    )}
+                  </svg>
+                  <span>{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mf-ctx-popover-sub">Start Side</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+            {(
+              [
+                { id: "none", label: "None" },
+                { id: "arrow", label: "Pointed" },
+                { id: "circle-outline", label: "Unfilled" },
+                { id: "circle-filled", label: "Filled" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={`start-${opt.id}`}
+                type="button"
+                className={`mf-chip-btn ${startHead === opt.id ? "is-active" : ""}`}
+                aria-pressed={startHead === opt.id}
+                onClick={() => onUpdateCrossLink({ startHead: opt.id })}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mf-ctx-popover-sub">End Side</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {(
+              [
+                { id: "none", label: "None" },
+                { id: "arrow", label: "Pointed" },
+                { id: "circle-outline", label: "Unfilled" },
+                { id: "circle-filled", label: "Filled" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={`end-${opt.id}`}
+                type="button"
+                className={`mf-chip-btn ${endHead === opt.id ? "is-active" : ""}`}
+                aria-pressed={endHead === opt.id}
+                onClick={() => onUpdateCrossLink({ endHead: opt.id })}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
