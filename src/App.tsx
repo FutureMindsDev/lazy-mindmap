@@ -143,6 +143,11 @@ export function App() {
     toastTimerRef.current = window.setTimeout(() => setToast(null), actionLabel ? 5500 : 2400);
   }, []);
 
+  const hasSelection = useMemo(
+    () => selectedIds.some((id) => Boolean(doc.nodes[id])),
+    [selectedIds, doc.nodes]
+  );
+
   const primarySelectedId = useMemo(() => {
     const valid = selectedIds.find((id) => doc.nodes[id]);
     return valid || doc.rootIds[0];
@@ -403,6 +408,10 @@ export function App() {
       const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
       if (activeTag === "INPUT" || activeTag === "TEXTAREA") return;
       if (!e.clipboardData) return;
+      if (!hasSelection) {
+        announce("Select a node first before pasting");
+        return;
+      }
 
       // 1. Check pasted image files/screenshots
       const items = Array.from(e.clipboardData.items || []);
@@ -470,6 +479,7 @@ export function App() {
     attachFilesToNode,
     commitDoc,
     announce,
+    hasSelection,
   ]);
 
   const handleSelectNode = useCallback(
@@ -648,6 +658,8 @@ export function App() {
       announce(`Selected all ${nextIds.length} nodes`);
     },
     onEscapeCanvas: () => {
+      const hadUiOpen =
+        stylePopoverOpen || stickerPopoverOpen || searchOpen || Boolean(crossLinkSourceId);
       setStylePopoverOpen(false);
       setStickerPopoverOpen(false);
       setSearchOpen(false);
@@ -655,6 +667,10 @@ export function App() {
       if (selectedIds.length > 1) {
         setSelectedIds([primarySelectedId]);
         announce("Cleared multi-selection");
+      } else if (selectedIds.length === 1 && !hadUiOpen) {
+        setSelectedIds([]);
+        setDrawerOpen(false);
+        announce("Deselected node");
       }
     },
     onSetTool: (t) => {
@@ -774,13 +790,14 @@ export function App() {
       const hits = Object.values(layouts)
         .filter((n) => n.x < wx2 && n.x + n.width > wx1 && n.y < wy2 && n.y + n.height > wy1)
         .map((n) => n.id);
-      if (hits.length > 0) setSelectedIds(hits);
+      setSelectedIds(hits);
     };
 
     const onUp = () => {
       if (!moved) {
-        setSelectedIds([doc.rootIds[0]]);
+        setSelectedIds([]);
         setCrossLinkSourceId(null);
+        setDrawerOpen(false);
       }
       setMarquee(null);
       window.removeEventListener("mousemove", onMove);
@@ -842,7 +859,7 @@ export function App() {
     );
   }, [doc.nodes, searchQuery]);
 
-  const primaryNode = doc.nodes[primarySelectedId] || doc.nodes[doc.rootIds[0]];
+  const primaryNode = hasSelection ? doc.nodes[primarySelectedId] || null : null;
 
   return (
     <div className="mf-app">
@@ -912,8 +929,20 @@ export function App() {
           const target = toggleDarkLight();
           announce(`Switched to ${target} theme`);
         }}
-        onOpenImageModal={() => setImageModalOpen(true)}
-        onToggleDrawer={() => setDrawerOpen((o) => !o)}
+        onOpenImageModal={() => {
+          if (!hasSelection) {
+            announce("Select a node first to add a photo");
+            return;
+          }
+          setImageModalOpen(true);
+        }}
+        onToggleDrawer={() => {
+          if (!drawerOpen && !hasSelection) {
+            announce("Select a node first to view notes & attachments");
+            return;
+          }
+          setDrawerOpen((o) => !o);
+        }}
         onOpenSubtreePaste={handleTriggerSubtreeModal}
         onOpenSearch={() => {
           setSearchOpen(true);

@@ -54,7 +54,6 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
 
       const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
       if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") {
-        // Still allow Ctrl/Cmd+F or Escape inside search input
         return;
       }
 
@@ -64,6 +63,8 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
       const key = e.key;
       const lower = key.toLowerCase();
 
+      // --- 1. Global Canvas & Workspace Shortcuts (active even with 0 nodes selected) ---
+
       // Select All Nodes: Cmd/Ctrl + A
       if (mod && !shift && !alt && lower === "a") {
         e.preventDefault();
@@ -71,7 +72,7 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
-      // Escape on canvas: clear multi-selection / popovers / cross-link mode
+      // Escape on canvas: clear multi-selection / popovers / cross-link mode / active selection
       if (!mod && !shift && !alt && key === "Escape") {
         e.preventDefault();
         handlers.onEscapeCanvas();
@@ -112,7 +113,11 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
       }
 
       // Undo / Redo: U, Ctrl+Z, R, Ctrl+Y, Ctrl+Shift+Z
-      if ((mod && shift && lower === "z") || (mod && !shift && lower === "y") || (!mod && !alt && !shift && lower === "r")) {
+      if (
+        (mod && shift && lower === "z") ||
+        (mod && !shift && lower === "y") ||
+        (!mod && !alt && !shift && lower === "r")
+      ) {
         e.preventDefault();
         handlers.onRedo();
         return;
@@ -123,7 +128,77 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
-      // Copy / Cut / Paste / Paste LLM Subtree
+      // Paste LLM Subtree: Ctrl+Shift+V
+      if (mod && !alt && shift && lower === "v") {
+        e.preventDefault();
+        handlers.onTriggerPasteAction(true);
+        return;
+      }
+
+      // Detached root: Ctrl+D
+      if (mod && !shift && !alt && lower === "d") {
+        e.preventDefault();
+        handlers.onAddDetachedRoot();
+        return;
+      }
+
+      // Alt + D: Toggle Light/Dark theme (use e.code for macOS Option compatibility)
+      if (alt && !mod && e.code === "KeyD") {
+        e.preventDefault();
+        handlers.onToggleDarkLight();
+        return;
+      }
+
+      // Alt + M: Cycle MindMeister theme
+      if (alt && !mod && e.code === "KeyM") {
+        e.preventDefault();
+        handlers.onCycleTheme();
+        return;
+      }
+
+      // Alt + 1..9: Collapse/Expand outline level 1..9; Alt + 0 / Shift + F: Expand all
+      if (alt && !mod && /^Digit[1-9]$/.test(e.code)) {
+        e.preventDefault();
+        const level = Number(e.code.replace("Digit", ""));
+        handlers.onCollapseToLevel(level);
+        return;
+      }
+      if ((alt && !mod && e.code === "Digit0") || (!mod && !alt && shift && lower === "f")) {
+        e.preventDefault();
+        handlers.onExpandAll();
+        return;
+      }
+
+      // Canvas Tools: V / H
+      if (!mod && !alt && !shift && lower === "v") {
+        e.preventDefault();
+        handlers.onSetTool("select");
+        return;
+      }
+      if (!mod && !alt && !shift && lower === "h") {
+        e.preventDefault();
+        handlers.onSetTool("hand");
+        return;
+      }
+
+      // --- 2. Guard when no node is selected ---
+      const hasSelection = handlers.selectedIds.some((id) => Boolean(handlers.doc.nodes[id]));
+      if (!hasSelection) {
+        if (
+          !mod &&
+          !alt &&
+          (key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight")
+        ) {
+          e.preventDefault();
+          const rootId = handlers.doc.rootIds[0];
+          if (rootId) handlers.onSelect([rootId]);
+        }
+        return;
+      }
+
+      // --- 3. Node-Targeted Shortcuts (require >= 1 selected node) ---
+
+      // Copy / Cut
       if (mod && !alt && !shift && lower === "c") {
         e.preventDefault();
         handlers.onCopy();
@@ -134,13 +209,6 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
         handlers.onCut();
         return;
       }
-      if (mod && !alt && shift && lower === "v") {
-        e.preventDefault();
-        handlers.onTriggerPasteAction(true);
-        return;
-      }
-      // Note: plain Ctrl+V is handled via window 'paste' event so browser provides DataTransfer;
-      // fallback if no paste event fires is handled gracefully there.
 
       // Text alignment: Shift+Ctrl+L / E / R
       if (mod && shift && !alt && lower === "l") {
@@ -171,29 +239,10 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
-      // Detached root: Ctrl+D vs Detach: D
-      if (mod && !shift && !alt && lower === "d") {
-        e.preventDefault();
-        handlers.onAddDetachedRoot();
-        return;
-      }
+      // Detach: D
       if (!mod && !shift && !alt && lower === "d") {
         e.preventDefault();
         handlers.onDetachSelected();
-        return;
-      }
-
-      // Alt + D: Toggle Light/Dark theme (use e.code for macOS Option compatibility)
-      if (alt && !mod && e.code === "KeyD") {
-        e.preventDefault();
-        handlers.onToggleDarkLight();
-        return;
-      }
-
-      // Alt + M: Cycle MindMeister theme
-      if (alt && !mod && e.code === "KeyM") {
-        e.preventDefault();
-        handlers.onCycleTheme();
         return;
       }
 
@@ -208,19 +257,6 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
       if (alt && !mod && e.code === "KeyT") {
         e.preventDefault();
         handlers.onFontSize("reset");
-        return;
-      }
-
-      // Alt + 1..9: Collapse/Expand outline level 1..9; Alt + 0: Expand all
-      if (alt && !mod && /^Digit[1-9]$/.test(e.code)) {
-        e.preventDefault();
-        const level = Number(e.code.replace("Digit", ""));
-        handlers.onCollapseToLevel(level);
-        return;
-      }
-      if (alt && !mod && e.code === "Digit0") {
-        e.preventDefault();
-        handlers.onExpandAll();
         return;
       }
 
@@ -294,14 +330,10 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
-      // Fold / Unfold: F / Shift+F
-      if (!mod && !alt && lower === "f") {
+      // Fold / Unfold: F
+      if (!mod && !alt && !shift && lower === "f") {
         e.preventDefault();
-        if (shift) {
-          handlers.onExpandAll();
-        } else {
-          handlers.onToggleCollapse();
-        }
+        handlers.onToggleCollapse();
         return;
       }
 
@@ -319,18 +351,6 @@ export function useMindMupShortcuts(handlers: ShortcutHandlers) {
       if (!mod && !alt && key === "=") {
         e.preventDefault();
         handlers.onSelectSiblings();
-        return;
-      }
-
-      // Canvas Tools: V / H
-      if (!mod && !alt && !shift && lower === "v") {
-        e.preventDefault();
-        handlers.onSetTool("select");
-        return;
-      }
-      if (!mod && !alt && !shift && lower === "h") {
-        e.preventDefault();
-        handlers.onSetTool("hand");
         return;
       }
 
