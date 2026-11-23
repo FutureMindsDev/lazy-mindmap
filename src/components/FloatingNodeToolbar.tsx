@@ -74,6 +74,7 @@ interface FloatingNodeToolbarProps {
   onRemovePhotos: () => void;
   onOpenDrawer: () => void;
   onToggleStickers: () => void;
+  isCrossLinkMode?: boolean;
   onToggleCrossLink: () => void;
   onBatchCollapse: (collapsed: boolean) => void;
   onDuplicateNodes: () => void;
@@ -108,6 +109,7 @@ export function FloatingNodeToolbar({
   onRemovePhotos,
   onOpenDrawer,
   onToggleStickers,
+  isCrossLinkMode = false,
   onToggleCrossLink,
   onBatchCollapse,
   onDuplicateNodes,
@@ -449,15 +451,29 @@ export function FloatingNodeToolbar({
           >
             <Smile size={14} aria-hidden="true" />
           </button>
-          {!isMulti && (
+          {selectedNodes.length <= 2 && (
             <button
               type="button"
               className="mf-ctx-btn"
-              aria-label="Draw cross-link (Alt+X)"
-              title="Draw cross-link arrow (Alt+X)"
+              aria-label={
+                selectedNodes.length === 2
+                  ? "Connect selected nodes with cross-link (Alt+X)"
+                  : isCrossLinkMode
+                  ? "Cancel cross-link mode (Esc)"
+                  : "Draw cross-link (Alt+X)"
+              }
+              aria-pressed={selectedNodes.length === 1 ? isCrossLinkMode : undefined}
+              title={
+                selectedNodes.length === 2
+                  ? "Connect these 2 nodes with cross-link (Alt+X)"
+                  : isCrossLinkMode
+                  ? "Cancel cross-link mode (Esc)"
+                  : "Draw cross-link arrow (Alt+X)"
+              }
               onClick={onToggleCrossLink}
             >
               <Spline size={14} aria-hidden="true" />
+              <span className="mf-ctx-label">Link</span>
             </button>
           )}
           <button

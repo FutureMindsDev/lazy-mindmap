@@ -892,6 +892,17 @@ button svg[class*="lucide-chevron"] {
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
 }
 
+.mf-node.is-crosslink-source {
+  box-shadow: 0 0 0 3px #f59e0b, 0 0 0 7px rgba(245, 158, 11, 0.24);
+  outline: 2px dashed #f59e0b;
+  outline-offset: 4px;
+}
+
+.mf-canvas-viewport.tool-crosslink .mf-node:not(.is-crosslink-source):hover {
+  box-shadow: 0 0 0 3px #10b981, 0 0 0 7px rgba(16, 185, 129, 0.22);
+  cursor: crosshair;
+}
+
 .mf-drop-indicator-line {
   position: absolute;
   top: 0;
@@ -1876,6 +1887,73 @@ button svg[class*="lucide-chevron"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.mf-crosslink-mode-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #1f242d;
+  color: #f8fafc;
+  border: 1px solid rgba(245, 158, 11, 0.65);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+  font-size: 0.78rem;
+  max-width: min(92vw, 560px);
+}
+
+.mf-crosslink-mode-banner span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mf-crosslink-mode-banner .mf-chip-btn {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.22);
+  flex-shrink: 0;
+}
+
+.mf-crosslink-edit-textarea {
+  width: 100%;
+  min-height: 68px;
+  resize: vertical;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1.42;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.mf-crosslink-edit-textarea:focus {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -1px;
+}
+
+.mf-crosslink-edit-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.mf-crosslink-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 /* Bottom-Right Circular LLM Button & Sliding Right Assistant Chatbox */
