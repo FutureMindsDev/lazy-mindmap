@@ -19,6 +19,7 @@ import {
   clampCrossLinkLabel,
   computeMindMapLayout,
   countSentences,
+  getNodeEdgeMidpoint,
   MAX_CROSSLINK_LABEL_CHARS,
   MAX_CROSSLINK_LABEL_SENTENCES,
   wrapCrossLinkLabelLines,
@@ -731,5 +732,54 @@ describe("Cross-Link Label Limits and Smart Behind-Layer Placement", () => {
       layer: "behind",
     });
     expect(denseResult.forceLabelAbove).toBe(true);
+  });
+
+  it("anchors cross-link endpoints to the middle edge of each node rather than node centers", () => {
+    const leftNode: LayoutNodeInfo = {
+      id: "left",
+      x: 100,
+      y: 200,
+      width: 140,
+      height: 60,
+      depth: 1,
+      branchColor: "#2563eb",
+      side: "left",
+      rootId: "root",
+    };
+    const rightNode: LayoutNodeInfo = {
+      id: "right",
+      x: 420,
+      y: 200,
+      width: 160,
+      height: 80,
+      depth: 1,
+      branchColor: "#2563eb",
+      side: "right",
+      rootId: "root",
+    };
+    const bottomNode: LayoutNodeInfo = {
+      id: "bottom",
+      x: 110,
+      y: 400,
+      width: 120,
+      height: 50,
+      depth: 2,
+      branchColor: "#2563eb",
+      side: "down",
+      rootId: "root",
+    };
+
+    const horizontalLink = buildCrossLinkPath(leftNode, rightNode);
+    expect(horizontalLink.startPoint).toEqual({ x: 240, y: 230, side: "right" });
+    expect(horizontalLink.endPoint).toEqual({ x: 420, y: 240, side: "left" });
+    expect(horizontalLink.path.startsWith("M 240 230 Q ")).toBe(true);
+    expect(horizontalLink.path.endsWith(" 420 240")).toBe(true);
+
+    const verticalLink = buildCrossLinkPath(leftNode, bottomNode);
+    expect(verticalLink.startPoint).toEqual({ x: 170, y: 260, side: "bottom" });
+    expect(verticalLink.endPoint).toEqual({ x: 170, y: 400, side: "top" });
+
+    expect(getNodeEdgeMidpoint(leftNode, 0, 230)).toEqual({ x: 100, y: 230, side: "left" });
+    expect(getNodeEdgeMidpoint(leftNode, 170, 50)).toEqual({ x: 170, y: 200, side: "top" });
   });
 });
