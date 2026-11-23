@@ -2136,6 +2136,126 @@ button svg[class*="lucide-chevron"] {
   gap: 8px;
 }
 
+.mf-llm-drawer .mf-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mf-llm-conv-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.74rem;
+}
+
+.mf-llm-conv-banner-title {
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mf-llm-conv-banner-title:hover {
+  color: var(--accent-color);
+}
+
+.mf-llm-conv-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.mf-llm-conv-item.is-active {
+  border-color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-surface));
+}
+
+.mf-llm-conv-main {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 9px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mf-llm-conv-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.mf-llm-conv-title {
+  font-size: 0.81rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mf-llm-conv-active-pill {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.mf-llm-conv-preview {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mf-llm-conv-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.69rem;
+  color: var(--text-muted);
+}
+
+.mf-llm-conv-delete {
+  align-self: center;
+  margin-right: 4px;
+  color: var(--text-muted);
+}
+
+.mf-llm-conv-delete:hover {
+  color: #ef4444;
+}
+
 .mf-llm-history-card {
   padding: 9px 10px;
   border-radius: 9px;
@@ -2379,6 +2499,18 @@ button svg[class*="lucide-chevron"] {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.mf-llm-retry-btn {
+  background: var(--accent-color);
+  color: #ffffff;
+  border-color: var(--accent-color);
+  font-weight: 600;
+}
+
+.mf-llm-retry-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .mf-llm-raw-error {

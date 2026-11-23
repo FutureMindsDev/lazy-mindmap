@@ -21,7 +21,9 @@ import {
   KeyRound,
   Loader2,
   MessageSquare,
+  MessageSquarePlus,
   Paperclip,
+  RotateCcw,
   Send,
   Sparkles,
   Trash2,
@@ -31,6 +33,7 @@ import type {
   LlmChatFile,
   LlmChatMessage,
   LlmConfig,
+  LlmConversation,
   LlmNodeChangeRecord,
   LlmProviderId,
   MindMapDocument,
@@ -39,16 +42,20 @@ import { renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   buildMindMapSystemPrompt,
   callLlmProvider,
+  createNewConversation,
+  deriveConversationTitle,
   findRelatedNodes,
   getNodeShortLabel,
   LLM_PROVIDER_META,
   LlmApiError,
-  loadLlmChatHistory,
+  loadActiveConversationId,
   loadLlmConfig,
+  loadLlmConversations,
   parseAndApplyLlmResponse,
   readFileForChat,
-  saveLlmChatHistory,
+  saveActiveConversationId,
   saveLlmConfig,
+  saveLlmConversations,
 } from "../utils/llmMindMapAgent";
 import { makeId } from "../utils/treeOps";
 
@@ -124,7 +131,12 @@ export function LlmAssistantDrawer({
   const [showKey, setShowKey] = useState(false);
   const [historyViewOpen, setHistoryViewOpen] = useState(false);
 
-  const [messages, setMessages] = useState<LlmChatMessage[]>(() => loadLlmChatHistory());
+  const [conversations, setConversations] = useState<LlmConversation[]>(() =>
+    loadLlmConversations()
+  );
+  const [activeConversationId, setActiveConversationId] = useState<string>(() =>
+    loadActiveConversationId(conversations)
+  );
   const [prompt, setPrompt] = useState("");
   const [stagedFiles, setStagedFiles] = useState<LlmChatFile[]>([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -143,12 +155,30 @@ export function LlmAssistantDrawer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const docRef = useRef(doc);
+  docRef.current = doc;
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const primarySelectedIdRef = useRef(primarySelectedId);
+  primarySelectedIdRef.current = primarySelectedId;
+
+  const activeConversation = useMemo(
+    () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
+    [conversations, activeConversationId]
+  );
+  const messages = activeConversation?.messages || [];
 
   const hasApiKey = Boolean(config.apiKey.trim());
 
   useEffect(() => {
-    saveLlmChatHistory(messages);
-  }, [messages]);
+    saveLlmConversations(conversations);
+  }, [conversations]);
+
+  useEffect(() => {
+    if (activeConversation?.id) {
+      saveActiveConversationId(activeConversation.id);
+    }
+  }, [activeConversation?.id]);
 
   useEffect(() => {
     if (open) {
@@ -229,59 +259,89 @@ export function LlmAssistantDrawer({
     }
   };
 
-  const submitPrompt = async () => {
-    const trimmed = prompt.trim();
-    if ((!trimmed && stagedFiles.length === 0) || sending || uploadingFiles) return;
+  const updateConversationMessages = (
+    convId: string,
+    updater: (prevMsgs: LlmChatMessage[]) => LlmChatMessage[]
+  ) => {
+    const now = new Date().toISOString();
+    setConversations((prev) =>
+      prev.map((c) => {
+        if (c.id !== convId) return c;
+        const nextMsgs = updater(c.messages);
+        return {
+          ...c,
+          title: deriveConversationTitle(nextMsgs),
+          updatedAt: now,
+          messages: nextMsgs,
+        };
+      })
+    );
+  };
 
-    if (!config.apiKey.trim()) {
-      setSettingsOpen(true);
+  const handleNewConversation = () => {
+    if (activeConversation && activeConversation.messages.length === 0) {
       setHistoryViewOpen(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId("msg"),
-          role: "error",
-          content:
-            "LLM provider API key is missing. Please add your API key in the settings panel above to send prompts.",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      requestAnimationFrame(() => apiKeyInputRef.current?.focus());
+      requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
-
-    const userMessage: LlmChatMessage = {
-      id: makeId("msg"),
-      role: "user",
-      content: trimmed || `Analyze attached file(s): ${stagedFiles.map((f) => f.name).join(", ")}`,
-      createdAt: new Date().toISOString(),
-      files: stagedFiles,
-    };
-
-    const nextHistory = [...messages, userMessage];
-    setMessages(nextHistory);
-    setPrompt("");
-    const currentFiles = stagedFiles;
-    setStagedFiles([]);
+    const fresh = createNewConversation();
+    setConversations((prev) => [fresh, ...prev]);
+    setActiveConversationId(fresh.id);
     setHistoryViewOpen(false);
-    setSending(true);
+    setPrompt("");
+    setStagedFiles([]);
+    onAnnounce("Started a new AI conversation");
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
 
+  const handleDeleteConversation = (convId: string) => {
+    setConversations((prev) => {
+      const remaining = prev.filter((c) => c.id !== convId);
+      if (remaining.length === 0) {
+        const fresh = createNewConversation();
+        setActiveConversationId(fresh.id);
+        return [fresh];
+      }
+      if (convId === activeConversation?.id) {
+        setActiveConversationId(remaining[0].id);
+      }
+      return remaining;
+    });
+    onAnnounce("Deleted conversation");
+  };
+
+  const handleClearAllConversations = () => {
+    const fresh = createNewConversation();
+    setConversations([fresh]);
+    setActiveConversationId(fresh.id);
+    onAnnounce("Cleared all AI conversations");
+  };
+
+  const executeLlmTurn = async (
+    convId: string,
+    historyUpToUserMsg: LlmChatMessage[],
+    userFiles: LlmChatFile[]
+  ) => {
+    setSending(true);
     try {
-      const systemPrompt = buildMindMapSystemPrompt(doc, selectedIds, currentFiles);
+      const curDoc = docRef.current;
+      const curSelected = selectedIdsRef.current;
+      const curPrimary = primarySelectedIdRef.current;
+      const systemPrompt = buildMindMapSystemPrompt(curDoc, curSelected, userFiles);
       const rawReply = await callLlmProvider({
         config,
         systemPrompt,
-        messages: nextHistory,
+        messages: historyUpToUserMsg,
       });
 
       const applied = parseAndApplyLlmResponse(
-        doc,
+        docRef.current,
         rawReply,
-        primarySelectedId,
-        currentFiles
+        curPrimary,
+        userFiles
       );
 
-      if (applied.doc !== doc) {
+      if (applied.doc !== docRef.current) {
         onApplyDocChange(applied.doc, applied.firstAffectedNodeId);
       }
 
@@ -292,14 +352,14 @@ export function LlmAssistantDrawer({
         createdAt: new Date().toISOString(),
         affectedNodes: applied.affectedNodes,
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      updateConversationMessages(convId, (prev) => [...prev, assistantMessage]);
     } catch (err) {
       const errorMsg =
         err instanceof Error ? err.message : "LLM API request failed with an unknown error.";
       const status = err instanceof LlmApiError && err.status ? ` (HTTP ${err.status})` : "";
       const rawError = err instanceof LlmApiError ? err.rawError : undefined;
 
-      setMessages((prev) => [
+      updateConversationMessages(convId, (prev) => [
         ...prev,
         {
           id: makeId("msg"),
@@ -312,6 +372,80 @@ export function LlmAssistantDrawer({
     } finally {
       setSending(false);
     }
+  };
+
+  const submitPrompt = async () => {
+    const trimmed = prompt.trim();
+    if ((!trimmed && stagedFiles.length === 0) || sending || uploadingFiles) return;
+    if (!activeConversation) return;
+
+    const convId = activeConversation.id;
+    const currentFiles = stagedFiles;
+    const userMessage: LlmChatMessage = {
+      id: makeId("msg"),
+      role: "user",
+      content: trimmed || `Analyze attached file(s): ${currentFiles.map((f) => f.name).join(", ")}`,
+      createdAt: new Date().toISOString(),
+      files: currentFiles,
+    };
+
+    const nextHistory = [...activeConversation.messages, userMessage];
+    updateConversationMessages(convId, () => nextHistory);
+    setPrompt("");
+    setStagedFiles([]);
+    setHistoryViewOpen(false);
+
+    if (!config.apiKey.trim()) {
+      setSettingsOpen(true);
+      updateConversationMessages(convId, (prev) => [
+        ...prev,
+        {
+          id: makeId("msg"),
+          role: "error",
+          content:
+            "LLM provider API key is missing. Add your API key above and click Retry.",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      requestAnimationFrame(() => apiKeyInputRef.current?.focus());
+      return;
+    }
+
+    await executeLlmTurn(convId, nextHistory, currentFiles);
+  };
+
+  const handleRetryError = async (errorMessageId: string) => {
+    if (sending || uploadingFiles || !activeConversation) return;
+
+    if (!config.apiKey.trim()) {
+      setSettingsOpen(true);
+      onAnnounce("Add your LLM provider API key above, then click Retry");
+      requestAnimationFrame(() => apiKeyInputRef.current?.focus());
+      return;
+    }
+
+    const convId = activeConversation.id;
+    const msgs = activeConversation.messages;
+    const errIdx = msgs.findIndex((m) => m.id === errorMessageId);
+    if (errIdx < 0) return;
+
+    let userIdx = -1;
+    for (let i = errIdx - 1; i >= 0; i--) {
+      if (msgs[i].role === "user") {
+        userIdx = i;
+        break;
+      }
+    }
+
+    if (userIdx < 0) {
+      updateConversationMessages(convId, (prev) => prev.filter((m) => m.id !== errorMessageId));
+      return;
+    }
+
+    const userFiles = msgs[userIdx].files || [];
+    const retryHistory = msgs.slice(0, userIdx + 1);
+    updateConversationMessages(convId, (prev) => prev.filter((m) => m.id !== errorMessageId));
+    await executeLlmTurn(convId, retryHistory, userFiles);
   };
 
   const handleTextareaKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -341,9 +475,11 @@ export function LlmAssistantDrawer({
     }
   };
 
-  const historyPairs = useMemo(() => {
-    return messages.filter((m) => m.role === "user" || m.role === "assistant" || m.role === "error");
-  }, [messages]);
+  const sortedConversations = useMemo(() => {
+    return [...conversations].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }, [conversations]);
 
   return (
     <>
@@ -393,14 +529,23 @@ export function LlmAssistantDrawer({
           <div className="mf-llm-header-actions">
             <button
               type="button"
+              className="mf-btn"
+              title="Start New Conversation"
+              aria-label="Start New Conversation"
+              onClick={handleNewConversation}
+            >
+              <MessageSquarePlus size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
               className={`mf-btn ${historyViewOpen ? "is-active" : ""}`}
               aria-pressed={historyViewOpen}
-              title="View Chat History"
-              aria-label="View Chat History"
+              title="Conversations History"
+              aria-label="Conversations History"
               onClick={() => setHistoryViewOpen((v) => !v)}
             >
               <History size={15} aria-hidden="true" />
-              <span className="mf-llm-badge-count">{messages.length}</span>
+              <span className="mf-llm-badge-count">{conversations.length}</span>
             </button>
             <button
               type="button"
@@ -544,89 +689,114 @@ export function LlmAssistantDrawer({
           </form>
         )}
 
-        {/* Chat History Overview Panel OR Active Chat Feed */}
+        {/* Conversations History Panel OR Active Chat Feed */}
         {historyViewOpen ? (
-          <div className="mf-llm-history-view" role="region" aria-label="Chat history">
+          <div className="mf-llm-history-view" role="region" aria-label="Conversations history">
             <div className="mf-llm-history-toolbar">
               <span className="mf-llm-history-title">
-                Chat History ({messages.length} message{messages.length === 1 ? "" : "s"})
+                Conversations ({conversations.length})
               </span>
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="mf-chip-btn"
+                  onClick={handleNewConversation}
+                >
+                  <MessageSquarePlus size={12} aria-hidden="true" /> New Chat
+                </button>
                 <button
                   type="button"
                   className="mf-chip-btn"
                   onClick={() => setHistoryViewOpen(false)}
                 >
-                  <MessageSquare size={12} aria-hidden="true" /> Back to Chat
+                  <MessageSquare size={12} aria-hidden="true" /> Current Chat
                 </button>
-                {messages.length > 0 && (
+                {(conversations.length > 1 || messages.length > 0) && (
                   <button
                     type="button"
                     className="mf-chip-btn mf-ctx-danger-btn"
-                    onClick={() => {
-                      setMessages([]);
-                      onAnnounce("Cleared LLM chat history");
-                    }}
+                    onClick={handleClearAllConversations}
                   >
-                    <Trash2 size={12} aria-hidden="true" /> Clear
+                    <Trash2 size={12} aria-hidden="true" /> Clear All
                   </button>
                 )}
               </div>
             </div>
 
             <div className="mf-llm-history-list">
-              {historyPairs.length === 0 ? (
-                <div className="mf-llm-empty-state">
-                  <History size={24} aria-hidden="true" />
-                  <p>No chat history yet. Send a prompt below to build or edit nodes.</p>
-                </div>
-              ) : (
-                historyPairs.map((m) => (
-                  <div key={m.id} className={`mf-llm-history-card is-${m.role}`}>
-                    <div className="mf-llm-history-meta">
-                      <strong>
-                        {m.role === "user"
-                          ? "You"
-                          : m.role === "error"
-                          ? "API Error"
-                          : "Assistant"}
-                      </strong>
-                      <span>{formatDateTime(m.createdAt)}</span>
-                    </div>
-                    <div className="mf-llm-history-snippet">{m.content}</div>
-                    {m.files && m.files.length > 0 && (
-                      <div className="mf-llm-history-tags">
-                        {m.files.map((f) => (
-                          <span key={f.id} className="mf-llm-mini-tag">
-                            📎 {f.name}
-                          </span>
-                        ))}
+              {sortedConversations.map((conv) => {
+                const isActive = conv.id === activeConversation?.id;
+                const lastMsg = conv.messages[conv.messages.length - 1];
+                const previewText = lastMsg
+                  ? lastMsg.content.replace(/\s+/g, " ").trim()
+                  : "No messages yet";
+                const nodeTouchCount = conv.messages.reduce(
+                  (sum, m) => sum + (m.affectedNodes?.length || 0),
+                  0
+                );
+                return (
+                  <div
+                    key={conv.id}
+                    className={`mf-llm-conv-item ${isActive ? "is-active" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="mf-llm-conv-main"
+                      onClick={() => {
+                        setActiveConversationId(conv.id);
+                        setHistoryViewOpen(false);
+                      }}
+                    >
+                      <div className="mf-llm-conv-top">
+                        <span className="mf-llm-conv-title">{conv.title}</span>
+                        {isActive && <span className="mf-llm-conv-active-pill">Active</span>}
                       </div>
-                    )}
-                    {m.affectedNodes && m.affectedNodes.length > 0 && (
-                      <div className="mf-llm-history-tags">
-                        {m.affectedNodes.map((an, idx) => (
-                          <button
-                            key={`${an.nodeId}-${idx}`}
-                            type="button"
-                            className="mf-llm-node-chip"
-                            onClick={() => {
-                              onFocusNode(an.nodeId);
-                              setHistoryViewOpen(false);
-                            }}
-                          >
-                            {actionLabel(an.action)}: {an.nodeLabel}
-                          </button>
-                        ))}
+                      <div className="mf-llm-conv-preview">{previewText}</div>
+                      <div className="mf-llm-conv-meta">
+                        <span>
+                          {conv.messages.length} msg{conv.messages.length === 1 ? "" : "s"}
+                          {nodeTouchCount > 0 ? ` · ${nodeTouchCount} node update(s)` : ""}
+                        </span>
+                        <span>{formatDateTime(conv.updatedAt)}</span>
                       </div>
-                    )}
+                    </button>
+                    <button
+                      type="button"
+                      className="mf-btn mf-llm-conv-delete"
+                      title={`Delete conversation "${conv.title}"`}
+                      aria-label={`Delete conversation ${conv.title}`}
+                      onClick={() => handleDeleteConversation(conv.id)}
+                    >
+                      <Trash2 size={13} aria-hidden="true" />
+                    </button>
                   </div>
-                ))
-              )}
+                );
+              })}
             </div>
           </div>
         ) : (
-          <div className="mf-llm-messages" role="log" aria-live="polite" aria-label="Chat messages">
+          <>
+            {(messages.length > 0 || conversations.length > 1) && activeConversation && (
+              <div className="mf-llm-conv-banner">
+                <button
+                  type="button"
+                  className="mf-llm-conv-banner-title"
+                  title="Switch conversation"
+                  onClick={() => setHistoryViewOpen(true)}
+                >
+                  <MessageSquare size={12} aria-hidden="true" />
+                  <span>{activeConversation.title}</span>
+                </button>
+                <button
+                  type="button"
+                  className="mf-chip-btn"
+                  onClick={handleNewConversation}
+                >
+                  <MessageSquarePlus size={12} aria-hidden="true" /> New Chat
+                </button>
+              </div>
+            )}
+            <div className="mf-llm-messages" role="log" aria-live="polite" aria-label="Chat messages">
             {messages.length === 0 && (
               <div className="mf-llm-empty-state">
                 <Sparkles size={26} aria-hidden="true" />
@@ -668,6 +838,14 @@ export function LlmAssistantDrawer({
                         <span>{msg.content}</span>
                       </div>
                       <div className="mf-llm-error-actions">
+                        <button
+                          type="button"
+                          className="mf-chip-btn mf-llm-retry-btn"
+                          aria-disabled={sending || uploadingFiles ? "true" : undefined}
+                          onClick={() => void handleRetryError(msg.id)}
+                        >
+                          <RotateCcw size={12} aria-hidden="true" /> Retry
+                        </button>
                         <button
                           type="button"
                           className="mf-chip-btn"
@@ -780,6 +958,7 @@ export function LlmAssistantDrawer({
 
             <div ref={messagesEndRef} />
           </div>
+          </>
         )}
 
         {/* Composer with Live Related Nodes Target Preview & Universal File Upload */}
