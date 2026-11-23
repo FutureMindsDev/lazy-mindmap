@@ -4,20 +4,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  CornerDownRight,
   Download,
   FilePlus2,
-  GitBranchPlus,
-  GitFork,
   Hand,
   HelpCircle,
-  ImagePlus,
   Keyboard,
   Loader2,
   Menu,
   Moon,
   MousePointer2,
-  Paperclip,
   PlusSquare,
   Redo2,
   Save,
@@ -32,6 +27,7 @@ import {
 } from "lucide-react";
 import type {
   CanvasTool,
+  ColorMode,
   ConnectorStyle,
   LayoutMode,
   MapSummary,
@@ -46,12 +42,12 @@ type MenuCategory = "all" | "file" | "layout" | "theme" | "tools";
 interface TopToolbarProps {
   maps: MapSummary[];
   activeMapId: string;
-  hasSelection: boolean;
   canUndo: boolean;
   canRedo: boolean;
   tool: CanvasTool;
   layout: LayoutMode;
   theme: ThemeId;
+  colorMode: ColorMode;
   connectorStyle: ConnectorStyle;
   horizontalGap: number;
   isDark: boolean;
@@ -59,25 +55,20 @@ interface TopToolbarProps {
   syncStatus: string;
   saveError: string | null;
   autoSaveIntervalSec: number;
-  drawerOpen: boolean;
   onSelectMap: (id: string) => void;
   onCreateNewMap: () => void;
   onDeleteCurrentMap: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onSetTool: (tool: CanvasTool) => void;
-  onAddChildNode: () => void;
-  onAddSiblingNode: () => void;
-  onInsertParentNode: () => void;
   onAddDetachedRootNode: () => void;
   onChangeLayout: (layout: LayoutMode) => void;
   onChangeTheme: (theme: ThemeId) => void;
+  onChangeColorMode: (mode: ColorMode) => void;
   onChangeConnector: (style: ConnectorStyle) => void;
   onChangeHorizontalGap: (gap: number) => void;
   onChangeAutoSaveInterval: (seconds: number) => void;
   onToggleDarkLight: () => void;
-  onOpenImageModal: () => void;
-  onToggleDrawer: () => void;
   onOpenSubtreePaste: () => void;
   onOpenSearch: () => void;
   onSaveNow: () => void;
@@ -112,12 +103,12 @@ const EXPORT_FORMATS = [
 export function TopToolbar({
   maps,
   activeMapId,
-  hasSelection,
   canUndo,
   canRedo,
   tool,
   layout,
   theme,
+  colorMode,
   connectorStyle,
   horizontalGap,
   isDark,
@@ -125,25 +116,20 @@ export function TopToolbar({
   syncStatus,
   saveError,
   autoSaveIntervalSec,
-  drawerOpen,
   onSelectMap,
   onCreateNewMap,
   onDeleteCurrentMap,
   onUndo,
   onRedo,
   onSetTool,
-  onAddChildNode,
-  onAddSiblingNode,
-  onInsertParentNode,
   onAddDetachedRootNode,
   onChangeLayout,
   onChangeTheme,
+  onChangeColorMode,
   onChangeConnector,
   onChangeHorizontalGap,
   onChangeAutoSaveInterval,
   onToggleDarkLight,
-  onOpenImageModal,
-  onToggleDrawer,
   onOpenSubtreePaste,
   onOpenSearch,
   onSaveNow,
@@ -231,40 +217,6 @@ export function TopToolbar({
           <button
             type="button"
             className="mf-btn mf-btn-primary"
-            aria-label="Add child node (Tab)"
-            title={
-              hasSelection
-                ? "Add child node to selection (Tab)"
-                : "Add new child node to root (Tab)"
-            }
-            onClick={onAddChildNode}
-          >
-            <GitBranchPlus size={15} aria-hidden="true" />
-            <span>Child</span>
-          </button>
-          <button
-            type="button"
-            className="mf-btn"
-            aria-label="Add sibling node (Enter)"
-            title="Add sibling node (Enter)"
-            onClick={onAddSiblingNode}
-          >
-            <CornerDownRight size={15} aria-hidden="true" />
-            <span>Sibling</span>
-          </button>
-          <button
-            type="button"
-            className="mf-btn"
-            aria-label="Insert parent node (Shift+Tab)"
-            title="Insert parent node (Shift+Tab)"
-            onClick={onInsertParentNode}
-          >
-            <GitFork size={15} aria-hidden="true" />
-            <span>Parent</span>
-          </button>
-          <button
-            type="button"
-            className="mf-btn"
             aria-label="Add detached floating node (Ctrl+D)"
             title="Add detached floating root node (Ctrl+D)"
             onClick={onAddDetachedRootNode}
@@ -321,28 +273,7 @@ export function TopToolbar({
 
         <span role="separator" aria-orientation="vertical" className="mf-toolbar-sep" />
 
-        <div role="group" aria-label="Rich content and search" className="mf-toolbar-group">
-          <button
-            type="button"
-            className="mf-btn"
-            aria-label="Add image to node (I)"
-            title="Add photo/image to node (I)"
-            onClick={onOpenImageModal}
-          >
-            <ImagePlus size={16} aria-hidden="true" />
-            <span>Photo</span>
-          </button>
-          <button
-            type="button"
-            className="mf-btn"
-            aria-label="Toggle notes and attachments drawer (A)"
-            title="Notes & Attachments drawer (A)"
-            aria-pressed={drawerOpen}
-            onClick={onToggleDrawer}
-          >
-            <Paperclip size={16} aria-hidden="true" />
-            <span>Notes</span>
-          </button>
+        <div role="group" aria-label="LLM and search" className="mf-toolbar-group">
           <button
             type="button"
             className="mf-btn"
@@ -613,6 +544,29 @@ export function TopToolbar({
                 <section className="mf-menu-section" aria-label="Theme and display">
                   <h3 className="mf-menu-section-title">Theme &amp; Appearance</h3>
 
+                  <div className="mf-menu-sublabel">Node &amp; Edge Color Mode</div>
+                  <div className="mf-menu-chip-grid">
+                    {(
+                      [
+                        {
+                          id: "contrast",
+                          label: isDark ? "Contrast (Light)" : "Contrast (Dark)",
+                        },
+                        { id: "colorful", label: "Colorful" },
+                        { id: "custom", label: "Custom" },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className={`mf-chip-btn ${colorMode === m.id ? "is-active" : ""}`}
+                        onClick={() => onChangeColorMode(m.id)}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="mf-menu-sublabel">Color Palette (Alt+M)</div>
                   <div className="mf-menu-chip-grid">
                     {Object.values(MIND_THEMES).map((t) => (
@@ -668,30 +622,6 @@ export function TopToolbar({
                     >
                       <Sparkles size={14} aria-hidden="true" />
                       <span>LLM Subtree Paste</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="mf-menu-item-btn"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onOpenImageModal();
-                      }}
-                    >
-                      <ImagePlus size={14} aria-hidden="true" />
-                      <span>Add Photo</span>
-                      <span className="mf-menu-kbd">I</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="mf-menu-item-btn"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onToggleDrawer();
-                      }}
-                    >
-                      <Paperclip size={14} aria-hidden="true" />
-                      <span>Notes Drawer</span>
-                      <span className="mf-menu-kbd">A</span>
                     </button>
                     <button
                       type="button"

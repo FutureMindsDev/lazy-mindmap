@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { AlertTriangle, Crosshair, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
+import { FloatingCrossLinkToolbar } from "./components/FloatingCrossLinkToolbar";
 import { FloatingNodeToolbar } from "./components/FloatingNodeToolbar";
 import { ImageLightboxModal, ImagePickerModal, ShortcutsModal, SubtreePasteModal } from "./components/Modals";
 import { MindMapNodeCard } from "./components/MindMapNodeCard";
@@ -16,6 +17,7 @@ import { useColorScheme } from "./hooks/useColorScheme";
 import { useMindMupShortcuts } from "./hooks/useMindMupShortcuts";
 import type {
   CanvasTool,
+  CrossLink,
   LayoutNodeInfo,
   MapSummary,
   MindMapDocument,
@@ -128,6 +130,7 @@ export function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [crossLinkSourceId, setCrossLinkSourceId] = useState<string | null>(null);
+  const [selectedCrossLinkId, setSelectedCrossLinkId] = useState<string | null>(null);
 
   const [liveStatus, setLiveStatus] = useState("");
   const [toast, setToast] = useState<{ msg: string; actionLabel?: string; onAction?: () => void } | null>(null);
@@ -164,8 +167,8 @@ export function App() {
   }, [selectedIds, doc.nodes, doc.rootIds]);
 
   const layouts = useMemo(
-    () => computeMindMapLayout(doc, measuredSizes),
-    [doc, measuredSizes]
+    () => computeMindMapLayout(doc, measuredSizes, isDark),
+    [doc, measuredSizes, isDark]
   );
 
   const commitDoc = useCallback((nextDoc: MindMapDocument, recordHistory = true) => {
@@ -431,7 +434,9 @@ export function App() {
         const rect = el.getBoundingClientRect();
         const cursorX = e.clientX - rect.left;
         const cursorY = e.clientY - rect.top;
-        const factor = e.deltaY < 0 ? 1.1 : 0.91;
+        const rawDelta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+        const clampedDelta = Math.max(-60, Math.min(60, rawDelta));
+        const factor = Math.exp(-clampedDelta * 0.0022);
         setViewport((v) => {
           const nextScale = Math.min(2.6, Math.max(0.2, v.scale * factor));
           const ratio = nextScale / v.scale;
@@ -577,6 +582,7 @@ export function App() {
 
   const handleSelectNode = useCallback(
     (id: string, additive: boolean) => {
+      setSelectedCrossLinkId(null);
       if (crossLinkSourceId) {
         if (crossLinkSourceId !== id) {
           const next = cloneDocument(doc);
@@ -758,6 +764,7 @@ export function App() {
       if (ids.length > 0) setSelectedIds(ids);
     },
     onSelectAll: () => {
+      setSelectedCrossLinkId(null);
       const visibleIds = Object.keys(layouts);
       const allIds = Object.keys(doc.nodes);
       const nextIds =
@@ -769,11 +776,16 @@ export function App() {
     },
     onEscapeCanvas: () => {
       const hadUiOpen =
-        stylePopoverOpen || stickerPopoverOpen || searchOpen || Boolean(crossLinkSourceId);
+        stylePopoverOpen ||
+        stickerPopoverOpen ||
+        searchOpen ||
+        Boolean(crossLinkSourceId) ||
+        Boolean(selectedCrossLinkId);
       setStylePopoverOpen(false);
       setStickerPopoverOpen(false);
       setSearchOpen(false);
       setCrossLinkSourceId(null);
+      setSelectedCrossLinkId(null);
       if (selectedIds.length > 1) {
         setSelectedIds([primarySelectedId]);
         announce("Cleared multi-selection");
@@ -880,6 +892,7 @@ export function App() {
       const curY = ev.clientY - rect.top;
       if (Math.abs(curX - startX) > 4 || Math.abs(curY - startY) > 4) {
         moved = true;
+        setSelectedCrossLinkId(null);
       }
       if (!moved) return;
       const box = {
@@ -905,6 +918,7 @@ export function App() {
       if (!moved) {
         setSelectedIds([]);
         setCrossLinkSourceId(null);
+        setSelectedCrossLinkId(null);
         setDrawerOpen(false);
       }
       setMarquee(null);
@@ -969,6 +983,150 @@ export function App() {
 
   const primaryNode = hasSelection ? doc.nodes[primarySelectedId] || null : null;
 
+  const updateCrossLink = useCallback(
+    (id: string, patch: Partial<CrossLink>) => {
+      const next = cloneDocument(doc);
+      const target = next.crossLinks.find((xl) => xl.id === id);
+      if (!target) return;
+      Object.assign(target, patch);
+      next.updatedAt = new Date().toISOString();
+      commitDoc(next);
+    },
+    [doc, commitDoc]
+  );
+
+  const deleteCrossLink = useCallback(
+    (id: string) => {
+      const next = cloneDocument(doc);
+      const beforeLen = next.crossLinks.length;
+      next.crossLinks = next.crossLinks.filter((xl) => xl.id !== id);
+      if (next.crossLinks.length !== beforeLen) {
+        next.updatedAt = new Date().toISOString();
+        commitDoc(next);
+        setSelectedCrossLinkId(null);
+        announce("Deleted cross-link");
+      }
+    },
+    [doc, commitDoc, announce]
+  );
+
+  useEffect(() => {
+    if (!selectedCrossLinkId || selectedIds.length > 0 || editingId || anyDialogOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        deleteCrossLink(selectedCrossLinkId);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedCrossLinkId, selectedIds.length, editingId, anyDialogOpen, deleteCrossLink]);
+
+  const activeCrossLinkData = useMemo(() => {
+    if (!selectedCrossLinkId || selectedIds.length > 0) return null;
+    const xl = doc.crossLinks.find((item) => item.id === selectedCrossLinkId);
+    if (!xl) return null;
+    const fromL = layouts[xl.fromId];
+    const toL = layouts[xl.toId];
+    if (!fromL || !toL) return null;
+    const { labelX, labelY } = buildCrossLinkPath(fromL, toL);
+    return { crossLink: xl, anchorPoint: { x: labelX, y: labelY } };
+  }, [selectedCrossLinkId, selectedIds.length, doc.crossLinks, layouts]);
+
+  const renderCrossLinkSvgLayer = (layerFilter: "behind" | "above") => {
+    const filtered = doc.crossLinks.filter((xl) => (xl.layer || "above") === layerFilter);
+    return (
+      <>
+        <defs>
+          {filtered.map((xl) => (
+            <marker
+              key={`marker-${xl.id}`}
+              id={`mf-xl-arrow-${xl.id}`}
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1 L 10 5 L 0 9 z" fill={xl.color || "#f59e0b"} />
+            </marker>
+          ))}
+        </defs>
+        {filtered.map((xl) => {
+          const fromL = layouts[xl.fromId];
+          const toL = layouts[xl.toId];
+          if (!fromL || !toL) return null;
+          const { path, labelX, labelY } = buildCrossLinkPath(fromL, toL);
+          const color = xl.color || "#f59e0b";
+          const isSelected = selectedCrossLinkId === xl.id && selectedIds.length === 0;
+          const dashArray =
+            xl.strokeStyle === "solid"
+              ? undefined
+              : xl.strokeStyle === "dotted"
+              ? "2 6"
+              : "6 5";
+          const handleClickLink = (e: ReactMouseEvent) => {
+            if (e.button !== 0 || editingId || crossLinkSourceId) return;
+            e.stopPropagation();
+            setStylePopoverOpen(false);
+            setStickerPopoverOpen(false);
+            setSelectedIds([]);
+            setSelectedCrossLinkId(xl.id);
+          };
+
+          return (
+            <g key={xl.id}>
+              {isSelected && (
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={7}
+                  opacity={0.24}
+                  strokeLinecap="round"
+                />
+              )}
+              <path
+                d={path}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={16}
+                className="mf-crosslink-hit"
+                onMouseDown={handleClickLink}
+              />
+              <path
+                d={path}
+                fill="none"
+                stroke={color}
+                strokeWidth={isSelected ? 2.8 : 2}
+                strokeDasharray={dashArray}
+                strokeLinecap="round"
+                markerEnd={`url(#mf-xl-arrow-${xl.id})`}
+              />
+              {xl.label && (
+                <text
+                  x={labelX}
+                  y={labelY}
+                  textAnchor="middle"
+                  fill={color}
+                  fontSize="12"
+                  fontWeight="700"
+                  className="mf-crosslink-label mf-crosslink-label-hit"
+                  onMouseDown={handleClickLink}
+                >
+                  {xl.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </>
+    );
+  };
+
   return (
     <div className="mf-app">
       {saveState === "error" && saveError && !saveErrorDismissed && (
@@ -1001,12 +1159,12 @@ export function App() {
       <TopToolbar
         maps={maps}
         activeMapId={doc.id}
-        hasSelection={hasSelection}
         canUndo={past.length > 0}
         canRedo={future.length > 0}
         tool={tool}
         layout={doc.layout}
         theme={doc.theme}
+        colorMode={doc.colorMode || "colorful"}
         connectorStyle={doc.connectorStyle}
         horizontalGap={doc.horizontalGap ?? DEFAULT_HORIZONTAL_GAP}
         isDark={isDark}
@@ -1014,7 +1172,6 @@ export function App() {
         syncStatus={syncStatus}
         saveError={saveError}
         autoSaveIntervalSec={autoSaveIntervalSec}
-        drawerOpen={drawerOpen}
         onSelectMap={async (id) => {
           const loaded = await loadMapDual(id);
           if (loaded) {
@@ -1022,6 +1179,7 @@ export function App() {
             setPast([]);
             setFuture([]);
             setSelectedIds([loaded.rootIds[0]]);
+            setSelectedCrossLinkId(null);
             setEditingId(null);
             announce(`Loaded "${loaded.title}"`);
           }
@@ -1034,6 +1192,7 @@ export function App() {
           setPast([]);
           setFuture([]);
           setSelectedIds([fresh.rootIds[0]]);
+          setSelectedCrossLinkId(null);
           setEditingId(fresh.rootIds[0]);
           await refreshMapList(fresh);
           announce(`Created "${title}"`);
@@ -1045,6 +1204,7 @@ export function App() {
             await performSave(fresh, false);
             setDoc(fresh);
             setSelectedIds([fresh.rootIds[0]]);
+            setSelectedCrossLinkId(null);
             await refreshMapList(fresh);
             announce("Reset workspace to starter map");
             return;
@@ -1054,18 +1214,20 @@ export function App() {
           const next = (remaining[0] && (await loadMapDual(remaining[0].id))) || createInitialMap();
           setDoc(next);
           setSelectedIds([next.rootIds[0]]);
+          setSelectedCrossLinkId(null);
           await refreshMapList(next);
           announce("Deleted mind map");
         }}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onSetTool={setTool}
-        onAddChildNode={handleAddChildNode}
-        onAddSiblingNode={() => handleAddSiblingNode("below")}
-        onInsertParentNode={handleInsertParentNode}
         onAddDetachedRootNode={handleAddDetachedRootNode}
         onChangeLayout={(layout) => commitDoc({ ...doc, layout, updatedAt: new Date().toISOString() })}
         onChangeTheme={(theme) => commitDoc({ ...doc, theme, updatedAt: new Date().toISOString() })}
+        onChangeColorMode={(colorMode) => {
+          commitDoc({ ...doc, colorMode, updatedAt: new Date().toISOString() });
+          announce(`Color mode: ${colorMode}`);
+        }}
         onChangeConnector={(connectorStyle) =>
           commitDoc({ ...doc, connectorStyle, updatedAt: new Date().toISOString() })
         }
@@ -1079,20 +1241,6 @@ export function App() {
         onToggleDarkLight={() => {
           const target = toggleDarkLight();
           announce(`Switched to ${target} theme`);
-        }}
-        onOpenImageModal={() => {
-          if (!hasSelection) {
-            announce("Select a node first to add a photo");
-            return;
-          }
-          setImageModalOpen(true);
-        }}
-        onToggleDrawer={() => {
-          if (!drawerOpen && !hasSelection) {
-            announce("Select a node first to view notes & attachments");
-            return;
-          }
-          setDrawerOpen((o) => !o);
         }}
         onOpenSubtreePaste={handleTriggerSubtreeModal}
         onOpenSearch={() => {
@@ -1159,7 +1307,7 @@ export function App() {
               transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
             }}
           >
-            {/* Back SVG layer: tree branch connectors stay behind node cards */}
+            {/* Back SVG layer: tree branch connectors + cross-links layered behind nodes */}
             <svg className="mf-svg-layer mf-svg-branches">
               {Object.values(doc.nodes).map((node) => {
                 const pLayout = layouts[node.id];
@@ -1180,6 +1328,7 @@ export function App() {
                   );
                 });
               })}
+              {renderCrossLinkSvgLayer("behind")}
             </svg>
 
             {Object.values(layouts).map((info: LayoutNodeInfo) => {
@@ -1190,6 +1339,7 @@ export function App() {
                   key={node.id}
                   node={node}
                   layout={info}
+                  colorMode={doc.colorMode || "colorful"}
                   zoomScale={viewport.scale}
                   isSelected={selectedIds.includes(node.id)}
                   isEditing={editingId === node.id}
@@ -1270,55 +1420,25 @@ export function App() {
               );
             })}
 
-            {/* Front SVG layer: cross-link dashed lines and labels sit above all node cards */}
+            {/* Front SVG layer: cross-link lines layered above all node cards */}
             <svg className="mf-svg-layer mf-svg-crosslinks">
-              <defs>
-                <marker
-                  id="mf-xl-arrow"
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
-                </marker>
-              </defs>
-
-              {doc.crossLinks.map((xl) => {
-                const fromL = layouts[xl.fromId];
-                const toL = layouts[xl.toId];
-                if (!fromL || !toL) return null;
-                const { path, labelX, labelY } = buildCrossLinkPath(fromL, toL);
-                return (
-                  <g key={xl.id}>
-                    <path
-                      d={path}
-                      fill="none"
-                      stroke={xl.color || "#f59e0b"}
-                      strokeWidth={2}
-                      strokeDasharray="6 5"
-                      markerEnd="url(#mf-xl-arrow)"
-                    />
-                    {xl.label && (
-                      <text
-                        x={labelX}
-                        y={labelY}
-                        textAnchor="middle"
-                        fill={xl.color || "#f59e0b"}
-                        fontSize="12"
-                        fontWeight="700"
-                        className="mf-crosslink-label"
-                      >
-                        {xl.label}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
+              {renderCrossLinkSvgLayer("above")}
             </svg>
           </div>
+
+          {!editingId && !anyDialogOpen && activeCrossLinkData && (
+            <FloatingCrossLinkToolbar
+              crossLink={activeCrossLinkData.crossLink}
+              anchorPoint={activeCrossLinkData.anchorPoint}
+              viewport={viewport}
+              containerRect={containerRect}
+              onUpdateCrossLink={(patch) =>
+                updateCrossLink(activeCrossLinkData.crossLink.id, patch)
+              }
+              onDeleteCrossLink={() => deleteCrossLink(activeCrossLinkData.crossLink.id)}
+              onDeselect={() => setSelectedCrossLinkId(null)}
+            />
+          )}
 
           {!editingId && !anyDialogOpen && selectedIds.length > 0 && (
             <FloatingNodeToolbar

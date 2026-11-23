@@ -679,6 +679,16 @@ dialog.mf-dialog::backdrop {
   stroke-linejoin: round;
 }
 
+.mf-crosslink-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.mf-crosslink-label-hit {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .mf-marquee {
   position: absolute;
   border: 1.5px dashed var(--accent-color);
@@ -1469,6 +1479,12 @@ dialog.mf-dialog::backdrop {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.mf-ctx-btn[aria-pressed="true"] {
+  background: rgba(59, 130, 246, 0.35);
+  border-color: #60a5fa;
+  color: #ffffff;
+}
+
 .mf-ctx-btn:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 1px;
@@ -1506,6 +1522,20 @@ dialog.mf-dialog::backdrop {
   height: 13px;
   border-radius: 4px;
   border: 1.5px solid #fff;
+}
+
+.mf-color-dot-solo {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+}
+
+.mf-edge-color-line {
+  display: inline-block;
+  width: 20px;
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
 }
 
 .mf-ctx-popover {

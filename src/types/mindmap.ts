@@ -14,6 +14,12 @@ export type CanvasTool = "select" | "hand";
 
 export type SaveState = "saved" | "saving" | "unsaved" | "error";
 
+export type ColorMode = "contrast" | "colorful" | "custom";
+
+export type CrossLinkStrokeStyle = "dashed" | "dotted" | "solid";
+
+export type CrossLinkLayer = "above" | "behind";
+
 export interface NodeImage {
   id: string;
   url: string;
@@ -37,6 +43,7 @@ export interface NodeAttachment {
 export interface NodeStyle {
   color?: string;
   borderColor?: string;
+  edgeColor?: string;
   textColor?: string;
   fontSize?: number;
   align?: NodeAlign;
@@ -66,6 +73,8 @@ export interface CrossLink {
   toId: string;
   label?: string;
   color?: string;
+  strokeStyle?: CrossLinkStrokeStyle;
+  layer?: CrossLinkLayer;
 }
 
 export interface MindMapDocument {
@@ -76,6 +85,7 @@ export interface MindMapDocument {
   crossLinks: CrossLink[];
   layout: LayoutMode;
   theme: ThemeId;
+  colorMode?: ColorMode;
   connectorStyle: ConnectorStyle;
   horizontalGap?: number;
   createdAt: string;

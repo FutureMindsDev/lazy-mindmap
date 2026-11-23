@@ -474,6 +474,46 @@ export function expandAllNodes(doc: MindMapDocument): MindMapDocument {
   return next;
 }
 
+export function getMaxDepth(doc: MindMapDocument): number {
+  let maxDepth = 0;
+  const visited = new Set<string>();
+  const visit = (id: string, depth: number) => {
+    if (visited.has(id)) return;
+    const node = doc.nodes[id];
+    if (!node) return;
+    visited.add(id);
+    if (depth > maxDepth) maxDepth = depth;
+    for (const cid of node.childrenIds) {
+      visit(cid, depth + 1);
+    }
+  };
+  for (const rootId of doc.rootIds) {
+    visit(rootId, 0);
+  }
+  return maxDepth;
+}
+
+export function applyCollapseState(
+  target: MindMapDocument,
+  source: MindMapDocument
+): MindMapDocument {
+  let nextNodes: Record<string, MindMapNode> | null = null;
+  for (const [id, node] of Object.entries(target.nodes)) {
+    const sourceNode = source.nodes[id];
+    if (!sourceNode) continue;
+    const targetCollapsed = Boolean(node.collapsed);
+    const sourceCollapsed = Boolean(sourceNode.collapsed);
+    if (targetCollapsed !== sourceCollapsed) {
+      if (!nextNodes) {
+        nextNodes = { ...target.nodes };
+      }
+      nextNodes[id] = { ...node, collapsed: sourceCollapsed };
+    }
+  }
+  if (!nextNodes) return target;
+  return { ...target, nodes: nextNodes };
+}
+
 export function updateNodesStyle(
   doc: MindMapDocument,
   ids: string[],
@@ -634,14 +674,17 @@ export function pasteSubtreeNodes(
 export function setNodesColor(
   doc: MindMapDocument,
   ids: string[],
-  colors: { color?: string; borderColor?: string; textColor?: string }
+  colors: { color?: string; borderColor?: string; edgeColor?: string; textColor?: string }
 ): MindMapDocument {
-  return updateNodesStyle(doc, ids, (node) => {
+  const next = updateNodesStyle(doc, ids, (node) => {
     node.style = node.style || {};
     if (colors.color !== undefined) node.style.color = colors.color;
     if (colors.borderColor !== undefined) node.style.borderColor = colors.borderColor;
+    if (colors.edgeColor !== undefined) node.style.edgeColor = colors.edgeColor;
     if (colors.textColor !== undefined) node.style.textColor = colors.textColor;
   });
+  next.colorMode = "custom";
+  return next;
 }
 
 export function resetNodesColor(doc: MindMapDocument, ids: string[]): MindMapDocument {
@@ -649,6 +692,7 @@ export function resetNodesColor(doc: MindMapDocument, ids: string[]): MindMapDoc
     if (!node.style) return;
     delete node.style.color;
     delete node.style.borderColor;
+    delete node.style.edgeColor;
     delete node.style.textColor;
   });
 }

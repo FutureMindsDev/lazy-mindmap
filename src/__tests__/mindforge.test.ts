@@ -154,6 +154,32 @@ describe("Layout Engine and Tree Operations", () => {
     expect(wideGap).toBe(180);
   });
 
+  it("supports contrast, colorful, and custom node/edge color modes and switches to custom automatically", () => {
+    const base = createInitialMap();
+    const rootId = base.rootIds[0];
+    const firstChildId = base.nodes[rootId].childrenIds[0];
+
+    const contrastLight = computeMindMapLayout({ ...base, colorMode: "contrast" }, undefined, false);
+    const contrastDark = computeMindMapLayout({ ...base, colorMode: "contrast" }, undefined, true);
+    expect(contrastLight[rootId].branchColor).toBe("#1e293b");
+    expect(contrastLight[firstChildId].branchColor).toBe("#1e293b");
+    expect(contrastDark[rootId].branchColor).toBe("#e2e8f0");
+    expect(contrastDark[firstChildId].branchColor).toBe("#e2e8f0");
+
+    const customDoc = setNodesColor(base, [firstChildId], {
+      edgeColor: "#ff00aa",
+      borderColor: "#ff00aa",
+    });
+    expect(customDoc.colorMode).toBe("custom");
+    const customLayout = computeMindMapLayout(customDoc);
+    expect(customLayout[firstChildId].branchColor).toBe("#ff00aa");
+    const grandChildId = customDoc.nodes[firstChildId].childrenIds[0];
+    expect(customLayout[grandChildId].branchColor).toBe("#ff00aa");
+
+    const backToColorful = computeMindMapLayout({ ...customDoc, colorMode: "colorful" });
+    expect(backToColorful[firstChildId].branchColor).not.toBe("#ff00aa");
+  });
+
   it("supports collapseToLevel, expandAllNodes, toggleCollapseNode, and hierarchy edits", () => {
     let doc = createInitialMap();
     const rootId = doc.rootIds[0];

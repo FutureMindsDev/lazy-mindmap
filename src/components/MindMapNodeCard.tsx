@@ -10,7 +10,7 @@ import {
   type MouseEvent,
 } from "react";
 import { Eye, Paperclip, Plus, StickyNote, Trash2 } from "lucide-react";
-import type { LayoutNodeInfo, MindMapNode, NodeImage } from "../types/mindmap";
+import type { ColorMode, LayoutNodeInfo, MindMapNode, NodeImage } from "../types/mindmap";
 import {
   decodeUtf8Base64,
   extractMarkdownFromClipboard,
@@ -23,6 +23,7 @@ import { toggleCheckboxLine } from "../utils/treeOps";
 interface MindMapNodeCardProps {
   node: MindMapNode;
   layout: LayoutNodeInfo;
+  colorMode?: ColorMode;
   zoomScale: number;
   isSelected: boolean;
   isEditing: boolean;
@@ -61,6 +62,7 @@ const DEFAULT_PLACEHOLDER_TEXTS = new Set(["New Idea", "New Sibling", "Floating 
 export function MindMapNodeCard({
   node,
   layout,
+  colorMode = "colorful",
   zoomScale,
   isSelected,
   isEditing,
@@ -138,11 +140,14 @@ export function MindMapNodeCard({
   const fontSize = node.style?.fontSize ?? (isRoot ? 16 : 14);
   const textAlign = node.style?.align || (isRoot ? "center" : "left");
 
+  const useCustomColors = colorMode === "custom";
   const customStyle: React.CSSProperties = {
     transform: `translate(${layout.x}px, ${layout.y}px)`,
     fontSize: `${fontSize}px`,
     textAlign,
-    "--node-border": node.style?.borderColor || layout.branchColor,
+    "--node-border": useCustomColors
+      ? node.style?.borderColor || node.style?.edgeColor || layout.branchColor
+      : layout.branchColor,
   } as React.CSSProperties;
 
   if (node.style?.width) {
@@ -153,13 +158,15 @@ export function MindMapNodeCard({
     customStyle.minHeight = `${node.style.minHeight}px`;
   }
 
-  if (isRoot && !node.style?.color) {
+  if (isRoot && (!useCustomColors || !node.style?.color)) {
     customStyle.background = layout.branchColor;
-    customStyle.color = node.style?.textColor || getContrastTextColor(layout.branchColor);
-  } else if (node.style?.color) {
+    customStyle.color =
+      (useCustomColors ? node.style?.textColor : undefined) ||
+      getContrastTextColor(layout.branchColor);
+  } else if (useCustomColors && node.style?.color) {
     customStyle.background = node.style.color;
     customStyle.color = node.style.textColor || getContrastTextColor(node.style.color);
-  } else if (node.style?.textColor) {
+  } else if (useCustomColors && node.style?.textColor) {
     customStyle.color = node.style.textColor;
   }
 

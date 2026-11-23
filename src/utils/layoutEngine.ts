@@ -105,11 +105,14 @@ function measureSubtreeSpanVertical(
 
 export function computeMindMapLayout(
   doc: MindMapDocument,
-  measuredSizes?: SizeMap
+  measuredSizes?: SizeMap,
+  isDark = false
 ): Record<string, LayoutNodeInfo> {
   const result: Record<string, LayoutNodeInfo> = {};
   const theme = MIND_THEMES[doc.theme] || MIND_THEMES.ocean;
   const palette = theme.branchColors;
+  const colorMode = doc.colorMode || "colorful";
+  const contrastColor = isDark ? "#e2e8f0" : "#1e293b";
   const hGap = Math.max(
     MIN_HORIZONTAL_GAP,
     Math.min(MAX_HORIZONTAL_GAP, doc.horizontalGap ?? DEFAULT_HORIZONTAL_GAP)
@@ -130,6 +133,13 @@ export function computeMindMapLayout(
     const rootX = rootCenterX - rootSize.width / 2;
     const rootY = rootCenterY - rootSize.height / 2;
 
+    const rootBranchColor =
+      colorMode === "contrast"
+        ? contrastColor
+        : colorMode === "colorful"
+        ? theme.rootBg
+        : root.style?.edgeColor || root.style?.borderColor || root.style?.color || theme.rootBg;
+
     result[rootId] = {
       id: rootId,
       x: rootX,
@@ -137,7 +147,7 @@ export function computeMindMapLayout(
       width: rootSize.width,
       height: rootSize.height,
       depth: 0,
-      branchColor: root.style?.borderColor || root.style?.color || theme.rootBg,
+      branchColor: rootBranchColor,
       side: "center",
       rootId,
     };
@@ -153,6 +163,13 @@ export function computeMindMapLayout(
         branchColor: string
       ) => {
         const size = estimateNodeSize(node, measuredSizes);
+        const resolvedColor =
+          colorMode === "contrast"
+            ? contrastColor
+            : colorMode === "colorful"
+            ? branchColor
+            : node.style?.edgeColor || node.style?.borderColor || node.style?.color || branchColor;
+
         if (node.id !== rootId) {
           result[node.id] = {
             id: node.id,
@@ -161,7 +178,7 @@ export function computeMindMapLayout(
             width: size.width,
             height: size.height,
             depth,
-            branchColor: node.style?.borderColor || node.style?.color || branchColor,
+            branchColor: resolvedColor,
             side: "down",
             rootId,
           };
@@ -181,13 +198,18 @@ export function computeMindMapLayout(
         kids.forEach((kid, idx) => {
           const span = childSpans[idx];
           const kidCenterX = cursorX + span / 2;
-          const color = depth === 0 ? palette[idx % palette.length] : branchColor;
+          const color =
+            colorMode === "contrast"
+              ? contrastColor
+              : depth === 0
+              ? palette[idx % palette.length]
+              : resolvedColor;
           placeDownSubtree(kid, kidCenterX, nextTopY, depth + 1, color);
           cursorX += span + orgSiblingGap;
         });
       };
 
-      placeDownSubtree(root, rootCenterX, rootY, 0, theme.rootBg);
+      placeDownSubtree(root, rootCenterX, rootY, 0, rootBranchColor);
     } else {
       const placeHorizontalSide = (
         kids: MindMapNode[],
@@ -210,7 +232,12 @@ export function computeMindMapLayout(
           const size = estimateNodeSize(node, measuredSizes);
           const x = direction === "right" ? edgeX : edgeX - size.width;
           const y = centerY - size.height / 2;
-          const resolvedColor = node.style?.borderColor || node.style?.color || branchColor;
+          const resolvedColor =
+            colorMode === "contrast"
+              ? contrastColor
+              : colorMode === "colorful"
+              ? branchColor
+              : node.style?.edgeColor || node.style?.borderColor || node.style?.color || branchColor;
 
           result[node.id] = {
             id: node.id,
@@ -237,14 +264,17 @@ export function computeMindMapLayout(
 
           grandKids.forEach((gk, gkIdx) => {
             const gkSpan = kidSpans[gkIdx];
-            placeNode(gk, nextEdgeX, kidCursorY + gkSpan / 2, depth + 1, branchColor);
+            placeNode(gk, nextEdgeX, kidCursorY + gkSpan / 2, depth + 1, resolvedColor);
             kidCursorY += gkSpan + V_GAP;
           });
         };
 
         kids.forEach((kid, idx) => {
           const span = spans[idx];
-          const branchColor = palette[(idx + startIdxOffset) % palette.length];
+          const branchColor =
+            colorMode === "contrast"
+              ? contrastColor
+              : palette[(idx + startIdxOffset) % palette.length];
           const edgeX =
             direction === "right" ? rootX + rootSize.width + hGap : rootX - hGap;
           placeNode(kid, edgeX, cursorY + span / 2, 1, branchColor);

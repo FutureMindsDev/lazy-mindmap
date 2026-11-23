@@ -16,7 +16,6 @@ import {
   ImagePlus,
   Italic,
   Maximize2,
-  PaintBucket,
   Paperclip,
   RotateCcw,
   Shapes,
@@ -35,7 +34,7 @@ import type {
 } from "../types/mindmap";
 import { FONT_SIZE_PRESETS, getContrastTextColor, NODE_COLOR_SWATCHES } from "../utils/themes";
 
-type ActivePanel = "color" | "font" | "shape" | "photo" | "tasks" | null;
+type ActivePanel = "color" | "edge-color" | "font" | "shape" | "photo" | "tasks" | null;
 
 interface FloatingNodeToolbarProps {
   selectedNodes: MindMapNode[];
@@ -47,7 +46,7 @@ interface FloatingNodeToolbarProps {
   onAddChild: () => void;
   onAddSibling: () => void;
   onInsertParent: () => void;
-  onSetColors: (colors: { color?: string; borderColor?: string; textColor?: string }) => void;
+  onSetColors: (colors: { color?: string; borderColor?: string; edgeColor?: string; textColor?: string }) => void;
   onResetColors: () => void;
   onSetFontSize: (size: number | "reset") => void;
   onAdjustFontSize: (mode: "inc" | "dec") => void;
@@ -101,6 +100,7 @@ export function FloatingNodeToolbar({
   onDeleteNodes,
 }: FloatingNodeToolbarProps) {
   const [panel, setPanel] = useState<ActivePanel>(null);
+  const [fillNodeWithEdge, setFillNodeWithEdge] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   useToolbarFocusGroup(toolbarRef);
@@ -110,6 +110,7 @@ export function FloatingNodeToolbar({
   const isAll = isMulti && selectedNodes.length >= totalVisibleCount;
   const currentFill = primary?.style?.color || anchorLayout?.branchColor || "#2563eb";
   const currentBorder = primary?.style?.borderColor || anchorLayout?.branchColor || "#2563eb";
+  const currentEdge = primary?.style?.edgeColor || anchorLayout?.branchColor || "#2563eb";
   const currentText = primary?.style?.textColor || getContrastTextColor(currentFill);
   const currentFont = primary?.style?.fontSize ?? (primary?.parentId === null ? 16 : 14);
   const currentShape = primary?.style?.shape || "rounded";
@@ -236,7 +237,7 @@ export function FloatingNodeToolbar({
           </>
         )}
 
-        {/* Color & Fill */}
+        {/* Color & Node+Edge Color */}
         <div role="group" aria-label="Colors" className="mf-toolbar-group">
           <button
             type="button"
@@ -246,10 +247,23 @@ export function FloatingNodeToolbar({
             title="Choose node fill, border & text color"
             onClick={() => togglePanel("color")}
           >
-            <PaintBucket size={15} aria-hidden="true" />
             <span
-              className="mf-color-dot"
+              className="mf-color-dot mf-color-dot-solo"
               style={{ background: currentFill, borderColor: currentBorder }}
+            />
+          </button>
+          <button
+            type="button"
+            className="mf-ctx-btn"
+            aria-label="Node and edge color picker"
+            aria-expanded={panel === "edge-color"}
+            title="Change node & connected edge color"
+            onClick={() => togglePanel("edge-color")}
+          >
+            <span
+              className="mf-edge-color-line"
+              style={{ background: currentEdge }}
+              aria-hidden="true"
             />
           </button>
         </div>
@@ -480,6 +494,82 @@ export function FloatingNodeToolbar({
                 type="color"
                 value={currentText}
                 onChange={(e) => onSetColors({ textColor: e.target.value })}
+              />
+            </label>
+            <button
+              type="button"
+              className="mf-chip-btn"
+              title="Reset to theme branch color"
+              onClick={onResetColors}
+            >
+              <RotateCcw size={12} aria-hidden="true" /> Auto
+            </button>
+          </div>
+        </div>
+      )}
+
+      {panel === "edge-color" && (
+        <div className="mf-ctx-popover">
+          <div className="mf-ctx-popover-title">
+            {isMulti
+              ? `Node + Edge Color (${selectedNodes.length} Nodes)`
+              : "Node & Connected Edge Color"}
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <button
+              type="button"
+              className={`mf-chip-btn ${!fillNodeWithEdge ? "is-active" : ""}`}
+              onClick={() => setFillNodeWithEdge(false)}
+            >
+              Border + Edge
+            </button>
+            <button
+              type="button"
+              className={`mf-chip-btn ${fillNodeWithEdge ? "is-active" : ""}`}
+              onClick={() => setFillNodeWithEdge(true)}
+            >
+              Fill + Border + Edge
+            </button>
+          </div>
+
+          <div className="mf-swatch-grid">
+            {NODE_COLOR_SWATCHES.map((swatch) => (
+              <button
+                key={swatch}
+                type="button"
+                className="mf-swatch"
+                aria-label={`Node and edge color ${swatch}`}
+                style={{ background: swatch }}
+                onClick={() =>
+                  onSetColors({
+                    edgeColor: swatch,
+                    borderColor: swatch,
+                    ...(fillNodeWithEdge || primary?.style?.color
+                      ? { color: swatch, textColor: getContrastTextColor(swatch) }
+                      : {}),
+                  })
+                }
+              />
+            ))}
+          </div>
+
+          <div className="mf-color-inputs-row">
+            <label>
+              <span>Node &amp; Edge</span>
+              <input
+                type="color"
+                value={currentEdge}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onSetColors({
+                    edgeColor: val,
+                    borderColor: val,
+                    ...(fillNodeWithEdge || primary?.style?.color
+                      ? { color: val, textColor: getContrastTextColor(val) }
+                      : {}),
+                  });
+                }}
               />
             </label>
             <button
