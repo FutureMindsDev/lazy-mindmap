@@ -22,6 +22,7 @@ import {
   getNodeEdgeMidpoint,
   MAX_CROSSLINK_LABEL_CHARS,
   MAX_CROSSLINK_LABEL_SENTENCES,
+  ROOT_TREE_GAP,
   wrapCrossLinkLabelLines,
 } from "../utils/layoutEngine";
 import {
@@ -781,5 +782,109 @@ describe("Cross-Link Label Limits and Smart Behind-Layer Placement", () => {
 
     expect(getNodeEdgeMidpoint(leftNode, 0, 230)).toEqual({ x: 100, y: 230, side: "left" });
     expect(getNodeEdgeMidpoint(leftNode, 170, 50)).toEqual({ x: 170, y: 200, side: "top" });
+  });
+});
+
+describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
+  const getTreeBounds = (layouts: Record<string, LayoutNodeInfo>, rootId: string) => {
+    const items = Object.values(layouts).filter((n) => n.rootId === rootId);
+    return {
+      minX: Math.min(...items.map((n) => n.x)),
+      minY: Math.min(...items.map((n) => n.y)),
+      maxX: Math.max(...items.map((n) => n.x + n.width)),
+      maxY: Math.max(...items.map((n) => n.y + n.height)),
+    };
+  };
+
+  const getMinBoxGap = (
+    a: { minX: number; minY: number; maxX: number; maxY: number },
+    b: { minX: number; minY: number; maxX: number; maxY: number }
+  ) => {
+    const dx = Math.max(a.minX - b.maxX, b.minX - a.maxX);
+    const dy = Math.max(a.minY - b.maxY, b.minY - a.maxY);
+    return Math.max(dx, dy);
+  };
+
+  it("automatically separates overlapping detached mind maps with at least ROOT_TREE_GAP across all layout modes", () => {
+    let doc = createBlankMap("Primary Map");
+    const root1 = doc.rootIds[0];
+    doc = addChildNode(doc, root1, "Branch A").doc;
+    doc = addChildNode(doc, root1, "Branch B").doc;
+
+    // Add second detached root intentionally overlapping root1 at (0, 0)
+    const det = addDetachedRootNode(doc, { x: 20, y: 10 }, "Second Mind Map");
+    doc = det.doc;
+    const root2 = det.newId;
+    doc = addChildNode(doc, root2, "Second Branch 1").doc;
+
+    for (const mode of ["mindmap", "tree-right", "org-chart"] as const) {
+      const layouts = computeMindMapLayout({ ...doc, layout: mode });
+      const b1 = getTreeBounds(layouts, root1);
+      const b2 = getTreeBounds(layouts, root2);
+      expect(getMinBoxGap(b1, b2)).toBeGreaterThanOrEqual(ROOT_TREE_GAP);
+    }
+  });
+
+  it("shifts an adjacent mind map automatically when an editing tree grows into it, and resolves 3 clustered maps", () => {
+    let doc = createBlankMap("Root 1");
+    const r1 = doc.rootIds[0];
+
+    // Place Root 2 comfortably below Root 1 initially (not overlapping)
+    const det2 = addDetachedRootNode(doc, { x: 0, y: 200 }, "Root 2");
+    doc = det2.doc;
+    const r2 = det2.newId;
+
+    // Place Root 3 clustered tightly near Root 1 & Root 2
+    const det3 = addDetachedRootNode(doc, { x: 30, y: 190 }, "Root 3");
+    doc = det3.doc;
+    const r3 = det3.newId;
+
+    // Grow Root 1 with tall nodes so it expands vertically into Root 2 & Root 3
+    for (let i = 0; i < 6; i++) {
+      const res = addChildNode(doc, r1, `Topic ${i + 1}`);
+      doc = resizeNodesBatch(res.doc, [res.newId], { width: 220, minHeight: 110 });
+    }
+
+    const layouts = computeMindMapLayout(doc);
+    const bounds = [r1, r2, r3].map((id) => getTreeBounds(layouts, id));
+    for (let i = 0; i < bounds.length; i++) {
+      for (let j = i + 1; j < bounds.length; j++) {
+        expect(getMinBoxGap(bounds[i], bounds[j])).toBeGreaterThanOrEqual(ROOT_TREE_GAP);
+      }
+    }
+
+    // Distant non-overlapping root retains its exact coordinates
+    let farDoc = createBlankMap("Near");
+    const farDet = addDetachedRootNode(farDoc, { x: 1800, y: 1400 }, "Far Away");
+    farDoc = farDet.doc;
+    const farLayouts = computeMindMapLayout(farDoc);
+    const farLayout = farLayouts[farDet.newId];
+    expect(farLayout.x + farLayout.width / 2).toBe(1800);
+    expect(farLayout.y + farLayout.height / 2).toBe(1400);
+  });
+
+  it("supports explicit no-fill ('none') color option without leaking into branch/edge colors", () => {
+    const base = createInitialMap();
+    const targetId = "node-math";
+    let doc = setNodesColor(base, [targetId], {
+      color: "#2563eb",
+      borderColor: "#10b981",
+      edgeColor: "#e11d48",
+      textColor: "#ffffff",
+    });
+
+    // Switching node fill to 'none' clears textColor, preserves border/edge color, and keeps custom mode
+    doc = setNodesColor(doc, [targetId], { color: "none" });
+    expect(doc.colorMode).toBe("custom");
+    expect(doc.nodes[targetId].style?.color).toBe("none");
+    expect(doc.nodes[targetId].style?.textColor).toBeUndefined();
+    expect(doc.nodes[targetId].style?.borderColor).toBe("#10b981");
+    expect(doc.nodes[targetId].style?.edgeColor).toBe("#e11d48");
+
+    // A node with only color: "none" (no borderColor/edgeColor) must never turn branchColor into "none"
+    const onlyNoFill = setNodesColor(base, [targetId], { color: "none" });
+    const layouts = computeMindMapLayout(onlyNoFill);
+    expect(layouts[targetId].branchColor).not.toBe("none");
+    expect(layouts[targetId].branchColor.startsWith("#")).toBe(true);
   });
 });

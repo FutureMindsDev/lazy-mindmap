@@ -2,6 +2,7 @@ import type { MindMapDocument, MindMapNode } from "../types/mindmap";
 import type { LayoutNodeInfo } from "../types/mindmap";
 import { buildConnectorPath } from "./layoutEngine";
 import { parseMarkdownToSubtree } from "./markdownToSubtree";
+import { getContrastTextColor } from "./themes";
 import { createBlankMap, insertSubtreeBranches, makeId } from "./treeOps";
 
 function triggerDownload(filename: string, content: string | Blob, mime: string) {
@@ -68,7 +69,10 @@ export function exportMapAsMindMup(doc: MindMapDocument) {
       title: node.text,
       id: node.id,
       attr: {
-        style: node.style?.color ? { background: node.style.color } : undefined,
+        style:
+          node.style?.color && node.style.color !== "none"
+            ? { background: node.style.color }
+            : undefined,
         note: node.notes ? { text: node.notes } : undefined,
         collapsed: node.collapsed || undefined,
       },
@@ -152,13 +156,29 @@ export function buildExportSvgString(
     }
   }
 
+  const useCustomColors = doc.colorMode === "custom";
   const boxes = items
     .map((info) => {
       const node = doc.nodes[info.id];
       const isRoot = info.depth === 0;
-      const fill = isRoot ? info.branchColor : cardBg;
-      const stroke = info.branchColor;
-      const color = isRoot ? "#ffffff" : textColor;
+      const customFill =
+        useCustomColors && node?.style?.color && node.style.color !== "none"
+          ? node.style.color
+          : undefined;
+      const explicitNoFill = useCustomColors && node?.style?.color === "none";
+      const fill = customFill || (isRoot && !explicitNoFill ? info.branchColor : cardBg);
+      const stroke =
+        useCustomColors && (node?.style?.borderColor || node?.style?.edgeColor)
+          ? node.style.borderColor || node.style.edgeColor || info.branchColor
+          : info.branchColor;
+      const color =
+        useCustomColors && node?.style?.textColor
+          ? node.style.textColor
+          : customFill
+          ? getContrastTextColor(customFill)
+          : isRoot && !explicitNoFill
+          ? getContrastTextColor(info.branchColor)
+          : textColor;
       const firstLine = (node?.text || "").split("\n")[0].replace(/[#*`$]/g, "").slice(0, 44);
       return `<g>
         <rect x="${info.x}" y="${info.y}" width="${info.width}" height="${info.height}" rx="12" fill="${fill}" stroke="${stroke}" stroke-width="2" />
