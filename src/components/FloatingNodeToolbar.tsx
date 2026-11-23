@@ -7,9 +7,12 @@ import {
   Bold,
   CheckSquare,
   CopyPlus,
+  CornerDownRight,
   Eye,
   FolderMinus,
   FolderPlus,
+  GitBranchPlus,
+  GitFork,
   ImagePlus,
   Italic,
   Maximize2,
@@ -41,6 +44,9 @@ interface FloatingNodeToolbarProps {
   viewport: { x: number; y: number; scale: number };
   containerRect: { width: number; height: number };
   onClearMultiSelect: () => void;
+  onAddChild: () => void;
+  onAddSibling: () => void;
+  onInsertParent: () => void;
   onSetColors: (colors: { color?: string; borderColor?: string; textColor?: string }) => void;
   onResetColors: () => void;
   onSetFontSize: (size: number | "reset") => void;
@@ -70,6 +76,9 @@ export function FloatingNodeToolbar({
   viewport,
   containerRect,
   onClearMultiSelect,
+  onAddChild,
+  onAddSibling,
+  onInsertParent,
   onSetColors,
   onResetColors,
   onSetFontSize,
@@ -189,6 +198,44 @@ export function FloatingNodeToolbar({
         className="mf-context-toolbar"
         {...({ focusgroup: "toolbar wrap" } as Record<string, string>)}
       >
+        {/* Node Creation */}
+        {!isMulti && (
+          <>
+            <div role="group" aria-label="Create nodes" className="mf-toolbar-group">
+              <button
+                type="button"
+                className="mf-ctx-btn"
+                aria-label="Add child node (Tab)"
+                title="Add child node (Tab)"
+                onClick={onAddChild}
+              >
+                <GitBranchPlus size={14} aria-hidden="true" />
+                <span className="mf-ctx-label">Child</span>
+              </button>
+              <button
+                type="button"
+                className="mf-ctx-btn"
+                aria-label="Add sibling node (Enter)"
+                title="Add sibling node (Enter)"
+                onClick={onAddSibling}
+              >
+                <CornerDownRight size={14} aria-hidden="true" />
+                <span className="mf-ctx-label">Sibling</span>
+              </button>
+              <button
+                type="button"
+                className="mf-ctx-btn"
+                aria-label="Insert parent node (Shift+Tab)"
+                title="Insert parent node (Shift+Tab)"
+                onClick={onInsertParent}
+              >
+                <GitFork size={14} aria-hidden="true" />
+              </button>
+            </div>
+            <span role="separator" aria-orientation="vertical" className="mf-ctx-sep" />
+          </>
+        )}
+
         {/* Color & Fill */}
         <div role="group" aria-label="Colors" className="mf-toolbar-group">
           <button

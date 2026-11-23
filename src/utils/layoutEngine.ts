@@ -9,7 +9,9 @@ import { MIND_THEMES } from "./themes";
 
 export type SizeMap = Record<string, { width: number; height: number }>;
 
-const H_GAP = 64;
+export const DEFAULT_HORIZONTAL_GAP = 80;
+export const MIN_HORIZONTAL_GAP = 36;
+export const MAX_HORIZONTAL_GAP = 260;
 const V_GAP = 22;
 const ROOT_GAP_Y = 96;
 
@@ -82,6 +84,7 @@ function measureSubtreeSpanHorizontal(
 function measureSubtreeSpanVertical(
   doc: MindMapDocument,
   nodeId: string,
+  siblingGap: number,
   measuredSizes?: SizeMap
 ): number {
   const node = doc.nodes[nodeId];
@@ -92,10 +95,10 @@ function measureSubtreeSpanVertical(
 
   const childrenTotal =
     children.reduce(
-      (sum, child) => sum + measureSubtreeSpanVertical(doc, child.id, measuredSizes),
+      (sum, child) => sum + measureSubtreeSpanVertical(doc, child.id, siblingGap, measuredSizes),
       0
     ) +
-    32 * (children.length - 1);
+    siblingGap * (children.length - 1);
 
   return Math.max(selfSize.width, childrenTotal);
 }
@@ -107,6 +110,11 @@ export function computeMindMapLayout(
   const result: Record<string, LayoutNodeInfo> = {};
   const theme = MIND_THEMES[doc.theme] || MIND_THEMES.ocean;
   const palette = theme.branchColors;
+  const hGap = Math.max(
+    MIN_HORIZONTAL_GAP,
+    Math.min(MAX_HORIZONTAL_GAP, doc.horizontalGap ?? DEFAULT_HORIZONTAL_GAP)
+  );
+  const orgSiblingGap = Math.max(24, Math.round(hGap * 0.4));
 
   let nextDetachedRootY = 0;
 
@@ -162,9 +170,11 @@ export function computeMindMapLayout(
         const kids = getVisibleChildren(doc, node);
         if (kids.length === 0) return;
 
-        const childSpans = kids.map((k) => measureSubtreeSpanVertical(doc, k.id, measuredSizes));
+        const childSpans = kids.map((k) =>
+          measureSubtreeSpanVertical(doc, k.id, orgSiblingGap, measuredSizes)
+        );
         const totalWidth =
-          childSpans.reduce((a, b) => a + b, 0) + 32 * Math.max(0, kids.length - 1);
+          childSpans.reduce((a, b) => a + b, 0) + orgSiblingGap * Math.max(0, kids.length - 1);
         let cursorX = centerX - totalWidth / 2;
         const nextTopY = topY + size.height + 54;
 
@@ -173,7 +183,7 @@ export function computeMindMapLayout(
           const kidCenterX = cursorX + span / 2;
           const color = depth === 0 ? palette[idx % palette.length] : branchColor;
           placeDownSubtree(kid, kidCenterX, nextTopY, depth + 1, color);
-          cursorX += span + 32;
+          cursorX += span + orgSiblingGap;
         });
       };
 
@@ -223,7 +233,7 @@ export function computeMindMapLayout(
           const kidTotalH =
             kidSpans.reduce((a, b) => a + b, 0) + V_GAP * Math.max(0, grandKids.length - 1);
           let kidCursorY = centerY - kidTotalH / 2;
-          const nextEdgeX = direction === "right" ? x + size.width + H_GAP : x - H_GAP;
+          const nextEdgeX = direction === "right" ? x + size.width + hGap : x - hGap;
 
           grandKids.forEach((gk, gkIdx) => {
             const gkSpan = kidSpans[gkIdx];
@@ -236,7 +246,7 @@ export function computeMindMapLayout(
           const span = spans[idx];
           const branchColor = palette[(idx + startIdxOffset) % palette.length];
           const edgeX =
-            direction === "right" ? rootX + rootSize.width + H_GAP : rootX - H_GAP;
+            direction === "right" ? rootX + rootSize.width + hGap : rootX - hGap;
           placeNode(kid, edgeX, cursorY + span / 2, 1, branchColor);
           cursorY += span + V_GAP;
         });

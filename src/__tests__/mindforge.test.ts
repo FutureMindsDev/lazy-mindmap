@@ -87,6 +87,18 @@ describe("Universal LLM Math Normalizer", () => {
     expect(md).toContain("$E = mc^2$");
     expect(md).not.toContain("Emc2");
   });
+
+  it("marks task checklist items with mf-task-item without altering rich inline formatting or normal bullets", () => {
+    const html = renderRichNodeContent(
+      "Tasks:\n- [x] Universal **LLM** math $E=mc^2$\n- [ ] Press `Space` to edit me\n\nBullets:\n- Regular bullet"
+    );
+    expect(html).toContain('<li class="mf-task-item">');
+    expect(html).toContain("mf-task-checkbox");
+    expect(html).toContain("<strong>LLM</strong>");
+    expect(html).toContain('class="katex"');
+    expect(html).toContain('<code class="mf-inline-code">Space</code>');
+    expect(html).toContain("<li>Regular bullet</li>");
+  });
 });
 
 describe("LLM Markdown Subtree Parser", () => {
@@ -129,6 +141,17 @@ describe("Layout Engine and Tree Operations", () => {
     const rootOrg = org[doc.rootIds[0]];
     const childOrg = org[doc.nodes[doc.rootIds[0]].childrenIds[0]];
     expect(childOrg.y).toBeGreaterThan(rootOrg.y);
+  });
+
+  it("respects custom horizontalGap for edge distance between nodes", () => {
+    const doc = createInitialMap();
+    const compact = computeMindMapLayout({ ...doc, layout: "tree-right", horizontalGap: 48 });
+    const wide = computeMindMapLayout({ ...doc, layout: "tree-right", horizontalGap: 180 });
+    const childId = doc.nodes[doc.rootIds[0]].childrenIds[0];
+    const compactGap = compact[childId].x - (compact[doc.rootIds[0]].x + compact[doc.rootIds[0]].width);
+    const wideGap = wide[childId].x - (wide[doc.rootIds[0]].x + wide[doc.rootIds[0]].width);
+    expect(compactGap).toBe(48);
+    expect(wideGap).toBe(180);
   });
 
   it("supports collapseToLevel, expandAllNodes, toggleCollapseNode, and hierarchy edits", () => {

@@ -23,7 +23,7 @@ function openIdb(): Promise<IDBDatabase> {
   });
 }
 
-export async function idbSaveMap(doc: MindMapDocument): Promise<void> {
+export async function idbSaveMap(doc: MindMapDocument): Promise<{ localSaved: boolean; error?: string }> {
   try {
     const db = await openIdb();
     await new Promise<void>((resolve, reject) => {
@@ -35,12 +35,22 @@ export async function idbSaveMap(doc: MindMapDocument): Promise<void> {
     try {
       localStorage.setItem(LAST_MAP_KEY, doc.id);
     } catch {}
-  } catch {
+    return { localSaved: true };
+  } catch (idbErr) {
     // Fallback to localStorage if IndexedDB fails in private browsing
     try {
       localStorage.setItem(`mindforge:map:${doc.id}`, JSON.stringify(doc));
       localStorage.setItem(LAST_MAP_KEY, doc.id);
-    } catch {}
+      return { localSaved: true };
+    } catch (lsErr) {
+      const msg =
+        lsErr instanceof Error
+          ? lsErr.message
+          : idbErr instanceof Error
+          ? idbErr.message
+          : "Local browser storage failed";
+      return { localSaved: false, error: msg };
+    }
   }
 }
 
@@ -105,17 +115,55 @@ export function getLastOpenedMapId(): string | null {
   }
 }
 
-export async function saveMapDual(doc: MindMapDocument): Promise<{ backendSynced: boolean }> {
-  await idbSaveMap(doc);
+export interface DualSaveResult {
+  ok: boolean;
+  backendSynced: boolean;
+  localSaved: boolean;
+  error?: string;
+}
+
+export async function saveMapDual(doc: MindMapDocument): Promise<DualSaveResult> {
+  const localRes = await idbSaveMap(doc);
   try {
     const res = await fetch(`/api/maps/${encodeURIComponent(doc.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc),
     });
-    return { backendSynced: res.ok };
-  } catch {
-    return { backendSynced: false };
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) detail = body.error;
+      } catch {}
+      return {
+        ok: false,
+        backendSynced: false,
+        localSaved: localRes.localSaved,
+        error: localRes.localSaved
+          ? `Server save failed (${detail}); cached locally in browser.`
+          : `Save failed on server (${detail}) and browser storage (${localRes.error || "unavailable"}).`,
+      };
+    }
+    if (!localRes.localSaved) {
+      return {
+        ok: true,
+        backendSynced: true,
+        localSaved: false,
+        error: `Saved to server, but local cache failed (${localRes.error || "unavailable"}).`,
+      };
+    }
+    return { ok: true, backendSynced: true, localSaved: true };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Server unreachable";
+    return {
+      ok: false,
+      backendSynced: false,
+      localSaved: localRes.localSaved,
+      error: localRes.localSaved
+        ? `Server unreachable (${detail}); changes cached locally.`
+        : `Save failed completely: server unreachable (${detail}) and local storage failed.`,
+    };
   }
 }
 

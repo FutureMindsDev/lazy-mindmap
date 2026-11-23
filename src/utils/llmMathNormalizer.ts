@@ -330,6 +330,12 @@ function decorateCheckboxesAndAlerts(html: string, sourceMarkdown: string): stri
     }
   );
 
+  // Mark task list <li> items so CSS removes bullets cleanly without altering inline/block formatting
+  processed = processed.replace(
+    /<li>(?=\s*(?:<p>\s*)?<input\b[^>]*\bclass="mf-task-checkbox")/gi,
+    '<li class="mf-task-item">'
+  );
+
   // Transform GitHub-style admonition blockquotes (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING], > [!CAUTION])
   processed = processed.replace(
     /<blockquote>\s*<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:<br\s*\/?>|\s)*([\s\S]*?)<\/p>([\s\S]*?)<\/blockquote>/gi,

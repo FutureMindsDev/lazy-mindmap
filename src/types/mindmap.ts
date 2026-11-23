@@ -12,6 +12,8 @@ export type NodeAlign = "left" | "center" | "right";
 
 export type CanvasTool = "select" | "hand";
 
+export type SaveState = "saved" | "saving" | "unsaved" | "error";
+
 export interface NodeImage {
   id: string;
   url: string;
@@ -75,6 +77,7 @@ export interface MindMapDocument {
   layout: LayoutMode;
   theme: ThemeId;
   connectorStyle: ConnectorStyle;
+  horizontalGap?: number;
   createdAt: string;
   updatedAt: string;
 }

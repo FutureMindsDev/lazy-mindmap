@@ -320,13 +320,298 @@ dialog.mf-dialog::backdrop {
 }
 
 .mf-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 0.74rem;
-  padding: 3px 8px;
+  font-weight: 500;
+  padding: 4px 10px;
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-muted);
   border: 1px solid var(--border-color);
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.mf-sync-pill.is-saved {
+  color: #15803d;
+  border-color: color-mix(in srgb, #22c55e 35%, var(--border-color));
+  background: color-mix(in srgb, #22c55e 10%, var(--bg-elevated));
+}
+
+.mf-sync-pill.is-saving {
+  color: var(--accent-color);
+  border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+}
+
+.mf-sync-pill.is-unsaved {
+  color: #b45309;
+  border-color: color-mix(in srgb, #f59e0b 45%, var(--border-color));
+  background: color-mix(in srgb, #f59e0b 12%, var(--bg-elevated));
+}
+
+.mf-sync-pill.is-error {
+  color: #dc2626;
+  border-color: color-mix(in srgb, #ef4444 55%, var(--border-color));
+  background: color-mix(in srgb, #ef4444 12%, var(--bg-elevated));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mf-spin {
+    animation: mf-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes mf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Top-of-Screen Save Failure Banner */
+.mf-save-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #fef2f2;
+  color: #991b1b;
+  border-bottom: 1px solid #fecaca;
+  font-size: 0.82rem;
+  z-index: 55;
+  flex-wrap: wrap;
+}
+
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .mf-save-error-banner {
+  background: #450a0a;
+  color: #fecaca;
+  border-bottom-color: #991b1b;
+}
+
+.mf-save-error-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mf-save-error-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mf-save-retry-btn {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+  font-weight: 600;
+}
+
+.mf-save-dismiss-btn {
+  background: transparent;
+}
+
+/* Top-Right Hamburger Menu */
+.mf-topbar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.mf-hamburger-btn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  font-weight: 600;
+}
+
+.mf-hamburger-btn[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.mf-hamburger-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(370px, calc(100vw - 24px));
+  max-height: min(78vh, calc(100vh - 100px));
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 13px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.28);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mf-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mf-menu-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.mf-menu-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 7px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mf-menu-tab {
+  flex: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mf-menu-tab.is-active {
+  background: var(--bg-surface);
+  color: var(--accent-color);
+  border-color: var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.mf-menu-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mf-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mf-menu-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.mf-menu-section-title {
+  margin: 0;
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.mf-menu-btn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mf-menu-item-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .mf-menu-item-btn:hover {
+    border-color: var(--accent-color);
+    background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-elevated));
+  }
+}
+
+.mf-menu-item-btn.is-danger {
+  color: #dc2626;
+}
+
+.mf-menu-kbd {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.mf-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mf-menu-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mf-menu-sublabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.mf-menu-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.mf-menu-value-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  color: var(--accent-color);
+}
+
+.mf-range-input {
+  width: 100%;
+  cursor: pointer;
+}
+
+.mf-theme-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  margin-right: 4px;
+  vertical-align: middle;
 }
 
 /* Canvas Viewport */
@@ -378,6 +663,22 @@ dialog.mf-dialog::backdrop {
   height: 1px;
 }
 
+.mf-svg-branches {
+  z-index: 1;
+}
+
+.mf-svg-crosslinks {
+  z-index: 32;
+}
+
+.mf-crosslink-label {
+  paint-order: stroke fill;
+  stroke: var(--bg-surface);
+  stroke-width: 6px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .mf-marquee {
   position: absolute;
   border: 1.5px dashed var(--accent-color);
@@ -389,6 +690,7 @@ dialog.mf-dialog::backdrop {
 /* Mind Map Node Card */
 .mf-node {
   position: absolute;
+  z-index: 5;
   min-width: 120px;
   max-width: 460px;
   background: var(--bg-surface);
@@ -523,6 +825,23 @@ dialog.mf-dialog::backdrop {
 .mf-node-content ol {
   margin: 0.25em 0;
   padding-left: 1.3em;
+}
+
+.mf-node-content li.mf-task-item,
+.mf-node-content li:has(> .mf-task-checkbox),
+.mf-node-content li:has(> p > .mf-task-checkbox) {
+  list-style: none;
+  list-style-type: none;
+}
+
+.mf-node-content ul:has(> li.mf-task-item):not(:has(> li:not(.mf-task-item))),
+.mf-node-content ol:has(> li.mf-task-item):not(:has(> li:not(.mf-task-item))) {
+  list-style: none;
+  padding-left: 0.15em;
+}
+
+.mf-node-content ul:has(> li.mf-task-item):has(> li:not(.mf-task-item)) li.mf-task-item {
+  margin-left: -1.1em;
 }
 
 .mf-node-content table {

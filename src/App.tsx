@@ -6,7 +6,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { Crosshair, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Crosshair, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
 import { FloatingNodeToolbar } from "./components/FloatingNodeToolbar";
 import { ImageLightboxModal, ImagePickerModal, ShortcutsModal, SubtreePasteModal } from "./components/Modals";
 import { MindMapNodeCard } from "./components/MindMapNodeCard";
@@ -23,6 +23,7 @@ import type {
   NodeAttachment,
   NodeImage,
   NodeShape,
+  SaveState,
 } from "./types/mindmap";
 import {
   exportMapAsFreeMind,
@@ -37,6 +38,7 @@ import {
   buildConnectorPath,
   buildCrossLinkPath,
   computeMindMapLayout,
+  DEFAULT_HORIZONTAL_GAP,
   type SizeMap,
 } from "./utils/layoutEngine";
 import { extractMarkdownFromClipboard } from "./utils/llmMathNormalizer";
@@ -94,7 +96,11 @@ interface ViewportTransform {
 export function App() {
   const [doc, setDoc] = useState<MindMapDocument>(() => createInitialMap());
   const [maps, setMaps] = useState<MapSummary[]>([]);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
   const [syncStatus, setSyncStatus] = useState("Loading…");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveErrorDismissed, setSaveErrorDismissed] = useState(false);
+  const [autoSaveIntervalSec, setAutoSaveIntervalSec] = useState<number>(45);
   const [past, setPast] = useState<MindMapDocument[]>([]);
   const [future, setFuture] = useState<MindMapDocument[]>([]);
 
@@ -133,6 +139,10 @@ export function App() {
   const saveTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const initializedRef = useRef(false);
+  const docRef = useRef<MindMapDocument>(doc);
+  docRef.current = doc;
+  const dirtyRef = useRef(false);
+  const saveSeqRef = useRef(0);
 
   const { isDark, toggleDarkLight } = useColorScheme();
 
@@ -183,6 +193,42 @@ export function App() {
     setMaps(summaries);
   }, []);
 
+  const performSave = useCallback(
+    async (targetDoc: MindMapDocument, isManual = false) => {
+      const seq = ++saveSeqRef.current;
+      setSaveState("saving");
+      setSyncStatus("Saving…");
+
+      const res = await saveMapDual(targetDoc);
+      if (seq !== saveSeqRef.current) return res;
+
+      if (res.ok) {
+        dirtyRef.current = false;
+        setSaveState("saved");
+        setSaveError(null);
+        setSaveErrorDismissed(false);
+        const timeStr = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        setSyncStatus(`Saved · ${timeStr}`);
+        void refreshMapList(targetDoc);
+        if (isManual) announce("Map saved");
+      } else {
+        setSaveState("error");
+        const errMsg =
+          res.error || "Auto-save failed. Check server connection or browser storage.";
+        setSaveError(errMsg);
+        setSaveErrorDismissed(false);
+        setSyncStatus("Save failed");
+        if (isManual) announce(errMsg);
+      }
+      return res;
+    },
+    [refreshMapList, announce]
+  );
+
   // Load initial workspace from backend/IndexedDB on mount
   useEffect(() => {
     let active = true;
@@ -197,16 +243,40 @@ export function App() {
         loaded = await loadMapDual(targetId);
       }
 
+      let initialSaveOk = backendOnline;
+      let initialSaveErr: string | undefined = backendOnline
+        ? undefined
+        : "Server unreachable — loaded from local browser cache.";
+
       if (!loaded) {
         loaded = createInitialMap();
-        await saveMapDual(loaded);
+        const saveRes = await saveMapDual(loaded);
+        initialSaveOk = saveRes.ok;
+        initialSaveErr = saveRes.error;
       }
 
       if (!active) return;
       setDoc(loaded);
       setSelectedIds([loaded.rootIds[0]]);
       await refreshMapList(loaded);
-      setSyncStatus(backendOnline ? "Synced (Docker + Local)" : "Local Cache (Offline)");
+
+      if (initialSaveOk) {
+        setSaveState("saved");
+        setSaveError(null);
+        setSaveErrorDismissed(false);
+        const timeStr = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        setSyncStatus(`Saved · ${timeStr}`);
+      } else {
+        setSaveState("error");
+        setSaveError(initialSaveErr || "Server unreachable — working locally.");
+        setSaveErrorDismissed(false);
+        setSyncStatus("Save failed");
+      }
+
       initializedRef.current = true;
 
       requestAnimationFrame(() => {
@@ -228,17 +298,40 @@ export function App() {
   // Debounced dual persistence whenever doc updates
   useEffect(() => {
     if (!initializedRef.current) return;
+    dirtyRef.current = true;
+    setSaveState((prev) => (prev === "error" ? "error" : "unsaved"));
+    setSyncStatus((prev) => (prev === "Save failed" ? prev : "Unsaved changes"));
+
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(async () => {
-      const { backendSynced } = await saveMapDual(doc);
-      setSyncStatus(backendSynced ? "Synced (Docker + Local)" : "Saved Locally (Offline)");
-      refreshMapList(doc);
-    }, 450);
+    saveTimerRef.current = window.setTimeout(() => {
+      void performSave(doc, false);
+    }, 4500);
 
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
-  }, [doc, refreshMapList]);
+  }, [doc, performSave]);
+
+  // Regular interval auto-save (default 45s) + visibilitychange safeguard
+  useEffect(() => {
+    const intervalMs = Math.max(15, autoSaveIntervalSec) * 1000;
+    const id = window.setInterval(() => {
+      if (!initializedRef.current) return;
+      void performSave(docRef.current, false);
+    }, intervalMs);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden" && initializedRef.current && dirtyRef.current) {
+        void performSave(docRef.current, false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [autoSaveIntervalSec, performSave]);
 
   const handleSizeChange = useCallback((nodeId: string, width: number, height: number) => {
     setMeasuredSizes((prev) => {
@@ -565,6 +658,46 @@ export function App() {
     setSubtreeModalOpen(true);
   }, []);
 
+  const handleAddChildNode = useCallback(() => {
+    const targetId = hasSelection ? primarySelectedId : doc.rootIds[0];
+    if (!targetId || !doc.nodes[targetId]) return;
+    const { doc: next, newId } = addChildNode(doc, targetId);
+    commitDoc(next);
+    setSelectedIds([newId]);
+    setEditingId(newId);
+  }, [doc, hasSelection, primarySelectedId, commitDoc]);
+
+  const handleAddSiblingNode = useCallback(
+    (pos: "below" | "above" = "below") => {
+      const targetId = hasSelection ? primarySelectedId : doc.rootIds[0];
+      if (!targetId || !doc.nodes[targetId]) return;
+      const { doc: next, newId } = addSiblingNode(doc, targetId, pos);
+      commitDoc(next);
+      setSelectedIds([newId]);
+      setEditingId(newId);
+    },
+    [doc, hasSelection, primarySelectedId, commitDoc]
+  );
+
+  const handleInsertParentNode = useCallback(() => {
+    const targetId = hasSelection ? primarySelectedId : doc.rootIds[0];
+    if (!targetId || !doc.nodes[targetId]) return;
+    const { doc: next, newId } = insertParentNode(doc, targetId);
+    commitDoc(next);
+    setSelectedIds([newId]);
+    setEditingId(newId);
+  }, [doc, hasSelection, primarySelectedId, commitDoc]);
+
+  const handleAddDetachedRootNode = useCallback(() => {
+    const cur = hasSelection ? layouts[primarySelectedId] : layouts[doc.rootIds[0]];
+    const pos = cur ? { x: cur.x + cur.width / 2, y: cur.y + cur.height + 110 } : { x: 0, y: 180 };
+    const { doc: next, newId } = addDetachedRootNode(doc, pos);
+    commitDoc(next);
+    setSelectedIds([newId]);
+    setEditingId(newId);
+    announce("Added detached root node");
+  }, [doc, hasSelection, layouts, primarySelectedId, commitDoc, announce]);
+
   const anyDialogOpen =
     shortcutsOpen || imageModalOpen || subtreeModalOpen || Boolean(lightboxImage);
 
@@ -577,39 +710,16 @@ export function App() {
     anyDialogOpen,
     onSelect: setSelectedIds,
     onStartEdit: setEditingId,
-    onAddChild: () => {
-      const { doc: next, newId } = addChildNode(doc, primarySelectedId);
-      commitDoc(next);
-      setSelectedIds([newId]);
-      setEditingId(newId);
-    },
-    onAddSibling: (pos) => {
-      const { doc: next, newId } = addSiblingNode(doc, primarySelectedId, pos);
-      commitDoc(next);
-      setSelectedIds([newId]);
-      setEditingId(newId);
-    },
-    onInsertParent: () => {
-      const { doc: next, newId } = insertParentNode(doc, primarySelectedId);
-      commitDoc(next);
-      setSelectedIds([newId]);
-      setEditingId(newId);
-    },
+    onAddChild: handleAddChildNode,
+    onAddSibling: handleAddSiblingNode,
+    onInsertParent: handleInsertParentNode,
     onDeleteSelected: () => {
       const { doc: next, nextSelectedId } = deleteNodes(doc, selectedIds);
       commitDoc(next);
       if (nextSelectedId) setSelectedIds([nextSelectedId]);
       announce("Deleted selected node(s)");
     },
-    onAddDetachedRoot: () => {
-      const cur = layouts[primarySelectedId];
-      const pos = cur ? { x: cur.x + cur.width / 2, y: cur.y + cur.height + 110 } : { x: 0, y: 180 };
-      const { doc: next, newId } = addDetachedRootNode(doc, pos);
-      commitDoc(next);
-      setSelectedIds([newId]);
-      setEditingId(newId);
-      announce("Added detached root node");
-    },
+    onAddDetachedRoot: handleAddDetachedRootNode,
     onDetachSelected: () => {
       const cur = layouts[primarySelectedId];
       const pos = cur ? { x: cur.x + cur.width / 2, y: cur.y + cur.height / 2 } : undefined;
@@ -686,10 +796,8 @@ export function App() {
     onTriggerPasteAction: (asSubtree) => {
       if (asSubtree) handleTriggerSubtreeModal();
     },
-    onSaveNow: async () => {
-      const { backendSynced } = await saveMapDual(doc);
-      setSyncStatus(backendSynced ? "Synced (Docker + Local)" : "Saved Locally (Offline)");
-      announce("Map saved");
+    onSaveNow: () => {
+      void performSave(doc, true);
     },
     onOpenSearch: () => {
       setSearchOpen(true);
@@ -863,17 +971,49 @@ export function App() {
 
   return (
     <div className="mf-app">
+      {saveState === "error" && saveError && !saveErrorDismissed && (
+        <div className="mf-save-error-banner" role="alert">
+          <div className="mf-save-error-msg">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>
+              <strong>Saving failed:</strong> {saveError}
+            </span>
+          </div>
+          <div className="mf-save-error-actions">
+            <button
+              type="button"
+              className="mf-chip-btn mf-save-retry-btn"
+              onClick={() => void performSave(doc, true)}
+            >
+              Retry Now
+            </button>
+            <button
+              type="button"
+              className="mf-chip-btn mf-save-dismiss-btn"
+              onClick={() => setSaveErrorDismissed(true)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <TopToolbar
         maps={maps}
         activeMapId={doc.id}
+        hasSelection={hasSelection}
         canUndo={past.length > 0}
         canRedo={future.length > 0}
         tool={tool}
         layout={doc.layout}
         theme={doc.theme}
         connectorStyle={doc.connectorStyle}
+        horizontalGap={doc.horizontalGap ?? DEFAULT_HORIZONTAL_GAP}
         isDark={isDark}
+        saveState={saveState}
         syncStatus={syncStatus}
+        saveError={saveError}
+        autoSaveIntervalSec={autoSaveIntervalSec}
         drawerOpen={drawerOpen}
         onSelectMap={async (id) => {
           const loaded = await loadMapDual(id);
@@ -889,7 +1029,7 @@ export function App() {
         onCreateNewMap={async () => {
           const title = `Mind Map ${maps.length + 1}`;
           const fresh = createBlankMap(title);
-          await saveMapDual(fresh);
+          await performSave(fresh, false);
           setDoc(fresh);
           setPast([]);
           setFuture([]);
@@ -902,7 +1042,7 @@ export function App() {
           if (maps.length <= 1) {
             const fresh = createInitialMap();
             await deleteMapDual(doc.id);
-            await saveMapDual(fresh);
+            await performSave(fresh, false);
             setDoc(fresh);
             setSelectedIds([fresh.rootIds[0]]);
             await refreshMapList(fresh);
@@ -920,11 +1060,22 @@ export function App() {
         onUndo={handleUndo}
         onRedo={handleRedo}
         onSetTool={setTool}
+        onAddChildNode={handleAddChildNode}
+        onAddSiblingNode={() => handleAddSiblingNode("below")}
+        onInsertParentNode={handleInsertParentNode}
+        onAddDetachedRootNode={handleAddDetachedRootNode}
         onChangeLayout={(layout) => commitDoc({ ...doc, layout, updatedAt: new Date().toISOString() })}
         onChangeTheme={(theme) => commitDoc({ ...doc, theme, updatedAt: new Date().toISOString() })}
         onChangeConnector={(connectorStyle) =>
           commitDoc({ ...doc, connectorStyle, updatedAt: new Date().toISOString() })
         }
+        onChangeHorizontalGap={(horizontalGap) =>
+          commitDoc({ ...doc, horizontalGap, updatedAt: new Date().toISOString() })
+        }
+        onChangeAutoSaveInterval={(sec) => {
+          setAutoSaveIntervalSec(sec);
+          announce(`Auto-save interval set to ${sec}s`);
+        }}
         onToggleDarkLight={() => {
           const target = toggleDarkLight();
           announce(`Switched to ${target} theme`);
@@ -948,10 +1099,8 @@ export function App() {
           setSearchOpen(true);
           requestAnimationFrame(() => searchInputRef.current?.focus());
         }}
-        onSaveNow={async () => {
-          const { backendSynced } = await saveMapDual(doc);
-          setSyncStatus(backendSynced ? "Synced (Docker + Local)" : "Saved Locally (Offline)");
-          announce("Map saved");
+        onSaveNow={() => {
+          void performSave(doc, true);
         }}
         onExportAction={async (fmt) => {
           if (fmt === "json") exportMapAsJson(doc);
@@ -977,7 +1126,7 @@ export function App() {
           try {
             const raw = await file.text();
             const imported = importMapFromFileContent(file.name, raw);
-            await saveMapDual(imported);
+            await performSave(imported, false);
             setDoc(imported);
             setPast([]);
             setFuture([]);
@@ -1010,21 +1159,8 @@ export function App() {
               transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
             }}
           >
-            <svg className="mf-svg-layer">
-              <defs>
-                <marker
-                  id="mf-xl-arrow"
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
-                </marker>
-              </defs>
-
+            {/* Back SVG layer: tree branch connectors stay behind node cards */}
+            <svg className="mf-svg-layer mf-svg-branches">
               {Object.values(doc.nodes).map((node) => {
                 const pLayout = layouts[node.id];
                 if (!pLayout || node.collapsed) return null;
@@ -1043,37 +1179,6 @@ export function App() {
                     />
                   );
                 });
-              })}
-
-              {doc.crossLinks.map((xl) => {
-                const fromL = layouts[xl.fromId];
-                const toL = layouts[xl.toId];
-                if (!fromL || !toL) return null;
-                const { path, labelX, labelY } = buildCrossLinkPath(fromL, toL);
-                return (
-                  <g key={xl.id}>
-                    <path
-                      d={path}
-                      fill="none"
-                      stroke={xl.color || "#f59e0b"}
-                      strokeWidth={2}
-                      strokeDasharray="6 5"
-                      markerEnd="url(#mf-xl-arrow)"
-                    />
-                    {xl.label && (
-                      <text
-                        x={labelX}
-                        y={labelY}
-                        textAnchor="middle"
-                        fill="#f59e0b"
-                        fontSize="12"
-                        fontWeight="600"
-                      >
-                        {xl.label}
-                      </text>
-                    )}
-                  </g>
-                );
               })}
             </svg>
 
@@ -1164,6 +1269,55 @@ export function App() {
                 />
               );
             })}
+
+            {/* Front SVG layer: cross-link dashed lines and labels sit above all node cards */}
+            <svg className="mf-svg-layer mf-svg-crosslinks">
+              <defs>
+                <marker
+                  id="mf-xl-arrow"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
+                </marker>
+              </defs>
+
+              {doc.crossLinks.map((xl) => {
+                const fromL = layouts[xl.fromId];
+                const toL = layouts[xl.toId];
+                if (!fromL || !toL) return null;
+                const { path, labelX, labelY } = buildCrossLinkPath(fromL, toL);
+                return (
+                  <g key={xl.id}>
+                    <path
+                      d={path}
+                      fill="none"
+                      stroke={xl.color || "#f59e0b"}
+                      strokeWidth={2}
+                      strokeDasharray="6 5"
+                      markerEnd="url(#mf-xl-arrow)"
+                    />
+                    {xl.label && (
+                      <text
+                        x={labelX}
+                        y={labelY}
+                        textAnchor="middle"
+                        fill={xl.color || "#f59e0b"}
+                        fontSize="12"
+                        fontWeight="700"
+                        className="mf-crosslink-label"
+                      >
+                        {xl.label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
           </div>
 
           {!editingId && !anyDialogOpen && selectedIds.length > 0 && (
@@ -1176,6 +1330,9 @@ export function App() {
               viewport={viewport}
               containerRect={containerRect}
               onClearMultiSelect={() => setSelectedIds([primarySelectedId])}
+              onAddChild={handleAddChildNode}
+              onAddSibling={() => handleAddSiblingNode("below")}
+              onInsertParent={handleInsertParentNode}
               onSetColors={(colors) => commitDoc(setNodesColor(doc, selectedIds, colors))}
               onResetColors={() => {
                 commitDoc(resetNodesColor(doc, selectedIds));
