@@ -47,6 +47,7 @@ import {
   expandAllNodes,
   getMaxDepth,
   getNodeMoveCapabilities,
+  getVisibleDragPreviewIds,
   insertParentNode,
   moveNodeRelative,
   removeAllPhotosFromNodes,
@@ -1265,5 +1266,28 @@ describe("Node Detaching (Floating Toolbar Batch & Drag Far Away)", () => {
     expect(rootAttachHint?.placement).toBe("inside");
     expect(rootAttachHint?.side).toBe("left");
     expect(rootAttachHint?.indicator.label).toBe("Attach to Left");
+  });
+
+  it("includes all visible children and nested descendants in the drag preview while excluding collapsed children and unrelated nodes", () => {
+    let doc = createInitialMap();
+    const grandChild = addChildNode(doc, "node-math-chatgpt", "Nested Integral");
+    doc = grandChild.doc;
+
+    const previewIds = getVisibleDragPreviewIds(doc, "node-math");
+    expect(previewIds.has("node-math")).toBe(true);
+    expect(previewIds.has("node-math-chatgpt")).toBe(true);
+    expect(previewIds.has("node-math-claude")).toBe(true);
+    expect(previewIds.has(grandChild.newId)).toBe(true);
+    expect(previewIds.has(doc.rootIds[0])).toBe(false);
+    expect(previewIds.has("node-shortcuts")).toBe(false);
+
+    // Collapsed descendants are excluded from the visible drag preview
+    const collapsedDoc = toggleCollapseNode(doc, "node-math-chatgpt");
+    const collapsedPreview = getVisibleDragPreviewIds(collapsedDoc, "node-math");
+    expect(collapsedPreview.has("node-math-chatgpt")).toBe(true);
+    expect(collapsedPreview.has(grandChild.newId)).toBe(false);
+
+    // Null/unknown drag id yields empty preview set
+    expect(getVisibleDragPreviewIds(doc, null).size).toBe(0);
   });
 });

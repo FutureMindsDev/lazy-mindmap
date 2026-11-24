@@ -1073,6 +1073,29 @@ export function getSubtreeIds(
   return out;
 }
 
+/**
+ * Returns the set of visible node IDs that should move together in the live drag preview
+ * when dragging `draggedId` (the node itself plus all expanded descendants).
+ */
+export function getVisibleDragPreviewIds(
+  doc: MindMapDocument,
+  draggedId: string | null | undefined
+): Set<string> {
+  const ids = new Set<string>();
+  if (!draggedId || !doc.nodes[draggedId]) return ids;
+  const walk = (id: string) => {
+    const node = doc.nodes[id];
+    if (!node || ids.has(id)) return;
+    ids.add(id);
+    if (node.collapsed) return;
+    for (const cid of node.childrenIds) {
+      walk(cid);
+    }
+  };
+  walk(draggedId);
+  return ids;
+}
+
 export function getSiblingIds(doc: MindMapDocument, nodeId: string): string[] {
   const node = doc.nodes[nodeId];
   if (!node) return [];
