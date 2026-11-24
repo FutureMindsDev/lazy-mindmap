@@ -105,20 +105,20 @@ function measureSubtreeSpanVertical(
   return Math.max(selfSize.width, childrenTotal);
 }
 
-interface TreeBox {
-  rootId: string;
-  nodeIds: string[];
+interface RectBox {
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
 }
 
-function boxesOverlap(
-  a: { minX: number; minY: number; maxX: number; maxY: number },
-  b: { minX: number; minY: number; maxX: number; maxY: number },
-  pad: number
-): boolean {
+interface TreeBox extends RectBox {
+  rootId: string;
+  nodeIds: string[];
+  nodeBoxes: RectBox[];
+}
+
+function boxesOverlap(a: RectBox, b: RectBox, pad: number): boolean {
   return (
     a.minX < b.maxX + pad &&
     a.maxX + pad > b.minX &&
@@ -128,8 +128,9 @@ function boxesOverlap(
 }
 
 /**
- * Automatically shifts subsequent detached root trees so separate mind maps
- * never overlap each other as trees grow, change layout, or get dragged nearby.
+ * Automatically shifts subsequent detached root trees so nodes from separate mind maps
+ * never collide with each other, while allowing detached roots to sit freely in open
+ * whitespace pockets around or above another tree without coarse bounding-box walls.
  */
 export function resolveOverlappingRootTrees(
   rootIds: string[],
@@ -154,19 +155,57 @@ export function resolveOverlappingRootTrees(
     let maxX = -Infinity;
     let maxY = -Infinity;
     const nodeIds: string[] = [];
+    const nodeBoxes: RectBox[] = [];
     for (const n of nodes) {
       nodeIds.push(n.id);
-      if (n.x < minX) minX = n.x;
-      if (n.y < minY) minY = n.y;
-      if (n.x + n.width > maxX) maxX = n.x + n.width;
-      if (n.y + n.height > maxY) maxY = n.y + n.height;
+      const box: RectBox = {
+        minX: n.x,
+        minY: n.y,
+        maxX: n.x + n.width,
+        maxY: n.y + n.height,
+      };
+      nodeBoxes.push(box);
+      if (box.minX < minX) minX = box.minX;
+      if (box.minY < minY) minY = box.minY;
+      if (box.maxX > maxX) maxX = box.maxX;
+      if (box.maxY > maxY) maxY = box.maxY;
     }
-    trees.push({ rootId, nodeIds, minX, minY, maxX, maxY });
+    trees.push({ rootId, nodeIds, nodeBoxes, minX, minY, maxX, maxY });
   }
 
   if (trees.length <= 1) return;
 
-  const placedBoxes: TreeBox[] = [trees[0]];
+  const placedTrees: TreeBox[] = [trees[0]];
+
+  const findFirstCollision = (
+    tree: TreeBox,
+    dx: number,
+    dy: number
+  ): { placedTree: TreeBox; placedNode: RectBox; movingNode: RectBox } | null => {
+    const shiftedOuter: RectBox = {
+      minX: tree.minX + dx,
+      minY: tree.minY + dy,
+      maxX: tree.maxX + dx,
+      maxY: tree.maxY + dy,
+    };
+    for (const placed of placedTrees) {
+      if (!boxesOverlap(shiftedOuter, placed, gap)) continue;
+      for (const nb of tree.nodeBoxes) {
+        const shiftedNb: RectBox = {
+          minX: nb.minX + dx,
+          minY: nb.minY + dy,
+          maxX: nb.maxX + dx,
+          maxY: nb.maxY + dy,
+        };
+        for (const pb of placed.nodeBoxes) {
+          if (boxesOverlap(shiftedNb, pb, gap)) {
+            return { placedTree: placed, placedNode: pb, movingNode: nb };
+          }
+        }
+      }
+    }
+    return null;
+  };
 
   const commitShift = (tree: TreeBox, dx: number, dy: number) => {
     if (dx !== 0 || dy !== 0) {
@@ -178,9 +217,15 @@ export function resolveOverlappingRootTrees(
         }
       }
     }
-    placedBoxes.push({
+    placedTrees.push({
       rootId: tree.rootId,
       nodeIds: tree.nodeIds,
+      nodeBoxes: tree.nodeBoxes.map((b) => ({
+        minX: b.minX + dx,
+        minY: b.minY + dy,
+        maxX: b.maxX + dx,
+        maxY: b.maxY + dy,
+      })),
       minX: tree.minX + dx,
       minY: tree.minY + dy,
       maxX: tree.maxX + dx,
@@ -190,8 +235,8 @@ export function resolveOverlappingRootTrees(
 
   for (let i = 1; i < trees.length; i++) {
     const tree = trees[i];
-    if (!placedBoxes.some((p) => boxesOverlap(tree, p, gap))) {
-      placedBoxes.push(tree);
+    if (!findFirstCollision(tree, 0, 0)) {
+      placedTrees.push(tree);
       continue;
     }
 
@@ -200,7 +245,7 @@ export function resolveOverlappingRootTrees(
     let resolved = false;
     let pops = 0;
 
-    while (queue.length > 0 && pops < 128) {
+    while (queue.length > 0 && pops < 256) {
       let bestIdx = 0;
       for (let q = 1; q < queue.length; q++) {
         if (queue[q].cost < queue[bestIdx].cost) {
@@ -210,29 +255,34 @@ export function resolveOverlappingRootTrees(
       const cur = queue.splice(bestIdx, 1)[0];
       pops++;
 
-      const shifted = {
-        minX: tree.minX + cur.dx,
-        maxX: tree.maxX + cur.dx,
-        minY: tree.minY + cur.dy,
-        maxY: tree.maxY + cur.dy,
-      };
-      const blocker = placedBoxes.find((p) => boxesOverlap(shifted, p, gap));
-      if (!blocker) {
+      const collision = findFirstCollision(tree, cur.dx, cur.dy);
+      if (!collision) {
         commitShift(tree, cur.dx, cur.dy);
         resolved = true;
         break;
       }
 
-      const downDy = blocker.maxY + gap - tree.minY;
-      const rightDx = blocker.maxX + gap - tree.minX;
-      const upDy = blocker.minY - gap - tree.maxY;
-      const leftDx = blocker.minX - gap - tree.maxX;
+      const { placedTree, placedNode, movingNode } = collision;
+      const eps = 1e-6;
+      const nodeDownDy = placedNode.maxY + gap - movingNode.minY;
+      const nodeUpDy = placedNode.minY - gap - movingNode.maxY;
+      const nodeRightDx = placedNode.maxX + gap - movingNode.minX;
+      const nodeLeftDx = placedNode.minX - gap - movingNode.maxX;
+
+      const treeDownDy = placedTree.maxY + gap - tree.minY;
+      const treeUpDy = placedTree.minY - gap - tree.maxY;
+      const treeRightDx = placedTree.maxX + gap - tree.minX;
+      const treeLeftDx = placedTree.minX - gap - tree.maxX;
 
       const rawEscapes: Array<[number, number, number]> = [
-        [cur.dx, tree.minY + downDy < blocker.maxY + gap ? downDy + 1e-6 : downDy, 0],
-        [tree.minX + rightDx < blocker.maxX + gap ? rightDx + 1e-6 : rightDx, cur.dy, 0.01],
-        [cur.dx, tree.maxY + upDy > blocker.minY - gap ? upDy - 1e-6 : upDy, 0.02],
-        [tree.maxX + leftDx > blocker.minX - gap ? leftDx - 1e-6 : leftDx, cur.dy, 0.03],
+        [cur.dx, movingNode.minY + nodeDownDy < placedNode.maxY + gap ? nodeDownDy + eps : nodeDownDy, 0],
+        [cur.dx, movingNode.maxY + nodeUpDy > placedNode.minY - gap ? nodeUpDy - eps : nodeUpDy, 0.005],
+        [movingNode.minX + nodeRightDx < placedNode.maxX + gap ? nodeRightDx + eps : nodeRightDx, cur.dy, 0.01],
+        [movingNode.maxX + nodeLeftDx > placedNode.minX - gap ? nodeLeftDx - eps : nodeLeftDx, cur.dy, 0.015],
+        [cur.dx, tree.minY + treeDownDy < placedTree.maxY + gap ? treeDownDy + eps : treeDownDy, 0.02],
+        [cur.dx, tree.maxY + treeUpDy > placedTree.minY - gap ? treeUpDy - eps : treeUpDy, 0.025],
+        [tree.minX + treeRightDx < placedTree.maxX + gap ? treeRightDx + eps : treeRightDx, cur.dy, 0.03],
+        [tree.maxX + treeLeftDx > placedTree.minX - gap ? treeLeftDx - eps : treeLeftDx, cur.dy, 0.035],
       ];
 
       for (const [candDx, candDy, tieBreak] of rawEscapes) {
@@ -248,7 +298,7 @@ export function resolveOverlappingRootTrees(
     }
 
     if (!resolved) {
-      const maxPlacedY = Math.max(...placedBoxes.map((b) => b.maxY));
+      const maxPlacedY = Math.max(...placedTrees.map((b) => b.maxY));
       const fallbackDy = maxPlacedY + gap - tree.minY;
       commitShift(
         tree,
@@ -262,7 +312,8 @@ export function resolveOverlappingRootTrees(
 export function computeMindMapLayout(
   doc: MindMapDocument,
   measuredSizes?: SizeMap,
-  isDark = false
+  isDark = false,
+  options?: { ignoreOverlapRootId?: string | null }
 ): Record<string, LayoutNodeInfo> {
   const result: Record<string, LayoutNodeInfo> = {};
   const theme = MIND_THEMES[doc.theme] || MIND_THEMES.ocean;
@@ -477,7 +528,10 @@ export function computeMindMapLayout(
   });
 
   if (doc.rootIds.length > 1) {
-    resolveOverlappingRootTrees(doc.rootIds, result, ROOT_TREE_GAP);
+    const activeRootIds = options?.ignoreOverlapRootId
+      ? doc.rootIds.filter((id) => id !== options.ignoreOverlapRootId)
+      : doc.rootIds;
+    resolveOverlappingRootTrees(activeRootIds, result, ROOT_TREE_GAP);
   }
 
   return result;

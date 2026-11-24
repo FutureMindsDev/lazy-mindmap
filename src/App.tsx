@@ -7,13 +7,17 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { AlertTriangle, Crosshair, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
+import { AdminDashboardModal } from "./components/AdminDashboardModal";
+import { AuthModal } from "./components/AuthModal";
 import { FloatingCrossLinkToolbar } from "./components/FloatingCrossLinkToolbar";
 import { FloatingNodeToolbar } from "./components/FloatingNodeToolbar";
 import { LlmAssistantDrawer } from "./components/LlmAssistantDrawer";
 import { ImageLightboxModal, ImagePickerModal, ShortcutsModal, SubtreePasteModal } from "./components/Modals";
 import { MindMapNodeCard } from "./components/MindMapNodeCard";
 import { NodeSideDrawer } from "./components/NodeSideDrawer";
+import { SubscriptionModal } from "./components/SubscriptionModal";
 import { TopToolbar } from "./components/TopToolbar";
+import { useAccount } from "./hooks/useAccount";
 import { useColorScheme } from "./hooks/useColorScheme";
 import { useMindMupShortcuts } from "./hooks/useMindMupShortcuts";
 import type {
@@ -69,10 +73,13 @@ import {
   applyCollapseState,
   cloneDocument,
   collapseToLevel,
+  computeDragDropHint,
   createBlankMap,
   createInitialMap,
   deleteNodes,
+  detachNodesToRoots,
   detachNodeToRoot,
+  type DragDropHint,
   duplicateNodes,
   expandAllNodes,
   getMaxDepth,
@@ -106,247 +113,6 @@ interface ViewportTransform {
   scale: number;
 }
 
-interface DragDropHint {
-  draggedId: string;
-  targetId: string;
-  placement: "before" | "after" | "inside";
-  side?: "left" | "right";
-  indicator: {
-    kind: "line" | "box";
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    label?: string;
-  };
-}
-
-function computeDragDropHint(
-  draggedId: string,
-  worldX: number,
-  worldY: number,
-  curDoc: MindMapDocument,
-  curLayouts: Record<string, LayoutNodeInfo>
-): DragDropHint | null {
-  const draggedNode = curDoc.nodes[draggedId];
-  const draggedLayout = curLayouts[draggedId];
-  if (!draggedNode || !draggedLayout || !draggedNode.parentId) return null;
-
-  const excluded = new Set(getSubtreeIds(curDoc, draggedId, true));
-  const candidates = Object.values(curLayouts).filter((l) => !excluded.has(l.id));
-
-  let bestCand: LayoutNodeInfo | null = null;
-  let bestDist = Infinity;
-
-  for (const cand of candidates) {
-    if (
-      worldX >= cand.x - 18 &&
-      worldX <= cand.x + cand.width + 18 &&
-      worldY >= cand.y - 18 &&
-      worldY <= cand.y + cand.height + 18
-    ) {
-      const cx = cand.x + cand.width / 2;
-      const cy = cand.y + cand.height / 2;
-      const dist = Math.hypot(worldX - cx, worldY - cy);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestCand = cand;
-      }
-    }
-  }
-
-  if (!bestCand) {
-    for (const cand of candidates) {
-      if (cand.depth === 0) continue;
-      if (curDoc.layout !== "org-chart") {
-        if (worldX >= cand.x - 48 && worldX <= cand.x + cand.width + 48) {
-          const cy = cand.y + cand.height / 2;
-          const vDist = Math.abs(worldY - cy);
-          if (vDist <= cand.height / 2 + 56 && vDist < bestDist) {
-            bestDist = vDist;
-            bestCand = cand;
-          }
-        }
-      } else if (worldY >= cand.y - 48 && worldY <= cand.y + cand.height + 48) {
-        const cx = cand.x + cand.width / 2;
-        const hDist = Math.abs(worldX - cx);
-        if (hDist <= cand.width / 2 + 56 && hDist < bestDist) {
-          bestDist = hDist;
-          bestCand = cand;
-        }
-      }
-    }
-  }
-
-  if (bestCand) {
-    if (bestCand.depth === 0) {
-      const candCenterX = bestCand.x + bestCand.width / 2;
-      const side =
-        curDoc.layout === "org-chart"
-          ? undefined
-          : curDoc.layout === "tree-right"
-          ? "right"
-          : worldX < candCenterX
-          ? "left"
-          : "right";
-      const label =
-        side === "left" ? "Move to Left" : side === "right" ? "Move to Right" : "Attach here";
-      return {
-        draggedId,
-        targetId: bestCand.id,
-        placement: "inside",
-        side,
-        indicator: {
-          kind: "box",
-          x: bestCand.x,
-          y: bestCand.y,
-          width: bestCand.width,
-          height: bestCand.height,
-          label,
-        },
-      };
-    }
-
-    if (curDoc.layout === "org-chart") {
-      const relX = (worldX - bestCand.x) / Math.max(1, bestCand.width);
-      if (relX < 0.34) {
-        return {
-          draggedId,
-          targetId: bestCand.id,
-          placement: "before",
-          indicator: {
-            kind: "line",
-            x: bestCand.x - 10,
-            y: bestCand.y - 4,
-            width: 4,
-            height: bestCand.height + 8,
-            label: "Move left",
-          },
-        };
-      }
-      if (relX > 0.66) {
-        return {
-          draggedId,
-          targetId: bestCand.id,
-          placement: "after",
-          indicator: {
-            kind: "line",
-            x: bestCand.x + bestCand.width + 6,
-            y: bestCand.y - 4,
-            width: 4,
-            height: bestCand.height + 8,
-            label: "Move right",
-          },
-        };
-      }
-      return {
-        draggedId,
-        targetId: bestCand.id,
-        placement: "inside",
-        indicator: {
-          kind: "box",
-          x: bestCand.x,
-          y: bestCand.y,
-          width: bestCand.width,
-          height: bestCand.height,
-          label: "Make child",
-        },
-      };
-    }
-
-    const candSide = bestCand.side === "left" ? "left" : "right";
-    const relY = (worldY - bestCand.y) / Math.max(1, bestCand.height);
-    if (relY < 0.34) {
-      return {
-        draggedId,
-        targetId: bestCand.id,
-        placement: "before",
-        side: candSide,
-        indicator: {
-          kind: "line",
-          x: bestCand.x,
-          y: bestCand.y - 10,
-          width: bestCand.width,
-          height: 4,
-          label: "Move above",
-        },
-      };
-    }
-    if (relY > 0.66) {
-      return {
-        draggedId,
-        targetId: bestCand.id,
-        placement: "after",
-        side: candSide,
-        indicator: {
-          kind: "line",
-          x: bestCand.x,
-          y: bestCand.y + bestCand.height + 6,
-          width: bestCand.width,
-          height: 4,
-          label: "Move below",
-        },
-      };
-    }
-    return {
-      draggedId,
-      targetId: bestCand.id,
-      placement: "inside",
-      side: candSide,
-      indicator: {
-        kind: "box",
-        x: bestCand.x,
-        y: bestCand.y,
-        width: bestCand.width,
-        height: bestCand.height,
-        label: "Make child",
-      },
-    };
-  }
-
-  if (curDoc.layout !== "org-chart") {
-    const rootLayout = curLayouts[draggedLayout.rootId];
-    if (rootLayout) {
-      const rootCenterX = rootLayout.x + rootLayout.width / 2;
-      const currentSide = draggedLayout.side === "left" ? "left" : "right";
-      if (currentSide === "right" && worldX < rootCenterX - 18) {
-        return {
-          draggedId,
-          targetId: rootLayout.id,
-          placement: "inside",
-          side: "left",
-          indicator: {
-            kind: "box",
-            x: rootLayout.x,
-            y: rootLayout.y,
-            width: rootLayout.width,
-            height: rootLayout.height,
-            label: "Move to Left",
-          },
-        };
-      }
-      if (currentSide === "left" && worldX > rootCenterX + 18) {
-        return {
-          draggedId,
-          targetId: rootLayout.id,
-          placement: "inside",
-          side: "right",
-          indicator: {
-            kind: "box",
-            x: rootLayout.x,
-            y: rootLayout.y,
-            width: rootLayout.width,
-            height: rootLayout.height,
-            label: "Move to Right",
-          },
-        };
-      }
-    }
-  }
-
-  return null;
-}
-
 export function App() {
   const [doc, setDoc] = useState<MindMapDocument>(() => createInitialMap());
   const [maps, setMaps] = useState<MapSummary[]>([]);
@@ -377,6 +143,9 @@ export function App() {
   const [subtreeModalOpen, setSubtreeModalOpen] = useState(false);
   const [subtreePrefill, setSubtreePrefill] = useState("");
   const [lightboxImage, setLightboxImage] = useState<NodeImage | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [llmChatOpen, setLlmChatOpen] = useState(false);
   const [stylePopoverOpen, setStylePopoverOpen] = useState(false);
@@ -389,11 +158,14 @@ export function App() {
   const [autoEditCrossLinkId, setAutoEditCrossLinkId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<{ nodeId: string; dx: number; dy: number } | null>(null);
   const [dragDropHint, setDragDropHint] = useState<DragDropHint | null>(null);
+  const [draggingRootId, setDraggingRootId] = useState<string | null>(null);
+  const [isMovingNode, setIsMovingNode] = useState(false);
 
   const [liveStatus, setLiveStatus] = useState("");
   const [toast, setToast] = useState<{ msg: string; actionLabel?: string; onAction?: () => void } | null>(null);
 
   const viewportRef = useRef<HTMLDivElement>(null);
+  const canvasWorldRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const internalClipboardRef = useRef<{ nodes: MindMapNode[]; plainFingerprint: string } | null>(null);
@@ -408,6 +180,14 @@ export function App() {
   const saveSeqRef = useRef(0);
 
   const { isDark, toggleDarkLight } = useColorScheme();
+  const {
+    account,
+    loading: accountLoading,
+    authVersion,
+    refreshAccount,
+    signInDevUser,
+    signOut,
+  } = useAccount();
 
   const announce = useCallback((msg: string, actionLabel?: string, onAction?: () => void) => {
     setLiveStatus(msg);
@@ -427,11 +207,18 @@ export function App() {
   }, [selectedIds, doc.nodes, doc.rootIds]);
 
   const layouts = useMemo(
-    () => computeMindMapLayout(doc, measuredSizes, isDark),
-    [doc, measuredSizes, isDark]
+    () =>
+      computeMindMapLayout(doc, measuredSizes, isDark, {
+        ignoreOverlapRootId: draggingRootId,
+      }),
+    [doc, measuredSizes, isDark, draggingRootId]
   );
   const layoutsRef = useRef(layouts);
   layoutsRef.current = layouts;
+  const measuredSizesRef = useRef(measuredSizes);
+  measuredSizesRef.current = measuredSizes;
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
   const viewportStateRef = useRef(viewport);
   viewportStateRef.current = viewport;
 
@@ -515,9 +302,17 @@ export function App() {
     [refreshMapList, announce]
   );
 
-  // Load initial workspace from backend/IndexedDB on mount
+  // Load workspace for the current user scope (guest or signed-in) once auth state settles
   useEffect(() => {
+    if (accountLoading) return;
     let active = true;
+    initializedRef.current = false;
+    dirtyRef.current = false;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
     (async () => {
       const { summaries, backendOnline } = await listMapsDual();
       const lastId = getLastOpenedMapId();
@@ -529,8 +324,9 @@ export function App() {
         loaded = await loadMapDual(targetId);
       }
 
-      let initialSaveOk = backendOnline;
-      let initialSaveErr: string | undefined = backendOnline
+      const guestLocalOnly = !account.authenticated && account.firebaseConfigured;
+      let initialSaveOk = guestLocalOnly ? true : backendOnline;
+      let initialSaveErr: string | undefined = initialSaveOk
         ? undefined
         : "Server unreachable — loaded from local browser cache.";
 
@@ -543,7 +339,11 @@ export function App() {
 
       if (!active) return;
       setDoc(loaded);
+      setPast([]);
+      setFuture([]);
       setSelectedIds([loaded.rootIds[0]]);
+      setSelectedCrossLinkId(null);
+      setEditingId(null);
       await refreshMapList(loaded);
 
       if (initialSaveOk) {
@@ -583,7 +383,7 @@ export function App() {
       active = false;
       if (initialFitTimerRef.current) window.clearTimeout(initialFitTimerRef.current);
     };
-  }, [refreshMapList]);
+  }, [accountLoading, authVersion, account.authenticated, account.firebaseConfigured, refreshMapList]);
 
   // Debounced dual persistence whenever doc updates
   useEffect(() => {
@@ -1105,6 +905,30 @@ export function App() {
     [hasSelection, doc, primarySelectedId, commitDoc, announce]
   );
 
+  const handleDetachSelectedNodes = useCallback(() => {
+    const idsToDetach = selectedIds.length > 0 ? selectedIds : [primarySelectedId];
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const id of idsToDetach) {
+      const cur = layouts[id];
+      if (cur) {
+        positions[id] = {
+          x: Math.round(cur.x + cur.width / 2),
+          y: Math.round(cur.y + cur.height / 2),
+        };
+      }
+    }
+    const { doc: next, detachedIds } = detachNodesToRoots(doc, idsToDetach, positions);
+    if (detachedIds.length > 0 && next !== doc) {
+      commitDoc(next);
+      setSelectedIds(detachedIds);
+      announce(
+        detachedIds.length === 1
+          ? "Detached node into independent root"
+          : `Detached ${detachedIds.length} nodes into independent roots`
+      );
+    }
+  }, [selectedIds, primarySelectedId, layouts, doc, commitDoc, announce]);
+
   const primaryMoveCapabilities = useMemo(() => {
     if (!hasSelection || selectedIds.length !== 1) return undefined;
     return getNodeMoveCapabilities(doc, primarySelectedId);
@@ -1132,15 +956,7 @@ export function App() {
       announce("Deleted selected node(s)");
     },
     onAddDetachedRoot: handleAddDetachedRootNode,
-    onDetachSelected: () => {
-      const cur = layouts[primarySelectedId];
-      const pos = cur ? { x: cur.x + cur.width / 2, y: cur.y + cur.height / 2 } : undefined;
-      const next = detachNodeToRoot(doc, primarySelectedId, pos);
-      if (next !== doc) {
-        commitDoc(next);
-        announce("Detached node into independent root");
-      }
-    },
+    onDetachSelected: handleDetachSelectedNodes,
     onMoveNode: handleMoveNode,
     onToggleCollapse: () => {
       commitDoc(toggleCollapseNode(doc, primarySelectedId), false);
@@ -1354,17 +1170,22 @@ export function App() {
 
       const startClientX = e.clientX;
       const startClientY = e.clientY;
+      setIsMovingNode(true);
 
       if (node.parentId === null) {
+        const preDragDoc = docRef.current;
         const origCenterX = layoutInfo.x + layoutInfo.width / 2;
         const origCenterY = layoutInfo.y + layoutInfo.height / 2;
         let moved = false;
+        let cancelled = false;
         let rafId: number | null = null;
         let latestClientX = startClientX;
         let latestClientY = startClientY;
+        let latestHint: DragDropHint | null = null;
 
         const applyDragPosition = () => {
           rafId = null;
+          if (cancelled) return;
           const scale = viewportStateRef.current.scale;
           const dx = (latestClientX - startClientX) / scale;
           const dy = (latestClientY - startClientY) / scale;
@@ -1380,12 +1201,41 @@ export function App() {
           });
         };
 
+        const cleanupRootDrag = () => {
+          setIsMovingNode(false);
+          setDraggingRootId(null);
+          setDragDropHint(null);
+          if (rafId !== null) {
+            window.cancelAnimationFrame(rafId);
+            rafId = null;
+          }
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+          window.removeEventListener("blur", onUp);
+          window.removeEventListener("keydown", onKeyDown, true);
+        };
+
+        const onKeyDown = (kev: KeyboardEvent) => {
+          if (kev.key === "Escape") {
+            kev.preventDefault();
+            kev.stopPropagation();
+            cancelled = true;
+            cleanupRootDrag();
+            if (moved) {
+              setDoc(preDragDoc);
+            }
+            announce("Node move cancelled");
+          }
+        };
+
         const onMove = (ev: MouseEvent) => {
-          const scale = viewportStateRef.current.scale;
-          const dx = (ev.clientX - startClientX) / scale;
-          const dy = (ev.clientY - startClientY) / scale;
+          if (cancelled) return;
+          const vp = viewportStateRef.current;
+          const dx = (ev.clientX - startClientX) / vp.scale;
+          const dy = (ev.clientY - startClientY) / vp.scale;
           if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
             moved = true;
+            setDraggingRootId(nodeId);
           }
           if (!moved) return;
           latestClientX = ev.clientX;
@@ -1393,45 +1243,79 @@ export function App() {
           if (rafId === null) {
             rafId = window.requestAnimationFrame(applyDragPosition);
           }
+
+          const rect = viewportRef.current?.getBoundingClientRect();
+          if (rect) {
+            const worldX = (ev.clientX - rect.left - vp.x) / vp.scale;
+            const worldY = (ev.clientY - rect.top - vp.y) / vp.scale;
+            const hint = computeDragDropHint(
+              nodeId,
+              worldX,
+              worldY,
+              docRef.current,
+              layoutsRef.current
+            );
+            latestHint = hint;
+            setDragDropHint(hint);
+          }
         };
 
         const onUp = () => {
-          if (rafId !== null) {
-            window.cancelAnimationFrame(rafId);
-            rafId = null;
-            if (moved) applyDragPosition();
+          const hintToApply = moved && !cancelled ? latestHint : null;
+          cleanupRootDrag();
+          if (cancelled) return;
+
+          if (hintToApply && hintToApply.placement !== "detach") {
+            const nextDoc = repositionNode(
+              preDragDoc,
+              hintToApply.draggedId,
+              hintToApply.targetId,
+              hintToApply.placement,
+              hintToApply.side
+            );
+            if (nextDoc !== preDragDoc) {
+              setPast((p) => [...p.slice(-79), preDragDoc]);
+              setFuture([]);
+              setDoc(nextDoc);
+              setSelectedIds([hintToApply.draggedId]);
+              announce(hintToApply.indicator.label || "Attached node to mind map");
+              return;
+            }
           }
+
           if (moved) {
-            window.requestAnimationFrame(() => {
-              const resolved = layoutsRef.current[nodeId];
-              if (!resolved) return;
-              const resolvedCenterX = Math.round(resolved.x + resolved.width / 2);
-              const resolvedCenterY = Math.round(resolved.y + resolved.height / 2);
-              setDoc((prev) => {
-                const curNode = prev.nodes[nodeId];
-                if (!curNode) return prev;
-                if (
-                  curNode.position?.x === resolvedCenterX &&
-                  curNode.position?.y === resolvedCenterY
-                ) {
-                  return prev;
-                }
-                const next = cloneDocument(prev);
-                if (next.nodes[nodeId]) {
-                  next.nodes[nodeId].position = {
-                    x: resolvedCenterX,
-                    y: resolvedCenterY,
-                  };
-                }
-                return next;
-              });
-            });
+            const scale = viewportStateRef.current.scale;
+            const dx = (latestClientX - startClientX) / scale;
+            const dy = (latestClientY - startClientY) / scale;
+            const next = cloneDocument(preDragDoc);
+            if (next.nodes[nodeId]) {
+              next.nodes[nodeId].position = {
+                x: Math.round(origCenterX + dx),
+                y: Math.round(origCenterY + dy),
+              };
+            }
+            const resolvedLayouts = computeMindMapLayout(
+              next,
+              measuredSizesRef.current,
+              isDarkRef.current
+            );
+            const resolved = resolvedLayouts[nodeId];
+            if (resolved && next.nodes[nodeId]) {
+              next.nodes[nodeId].position = {
+                x: Math.round(resolved.x + resolved.width / 2),
+                y: Math.round(resolved.y + resolved.height / 2),
+              };
+            }
+            next.updatedAt = new Date().toISOString();
+            setPast((p) => [...p.slice(-79), preDragDoc]);
+            setFuture([]);
+            setDoc(next);
           }
-          window.removeEventListener("mousemove", onMove);
-          window.removeEventListener("mouseup", onUp);
         };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
+        window.addEventListener("blur", onUp);
+        window.addEventListener("keydown", onKeyDown, true);
         return;
       }
 
@@ -1440,10 +1324,12 @@ export function App() {
       let latestHint: DragDropHint | null = null;
 
       const cleanup = () => {
+        setIsMovingNode(false);
         setDragState(null);
         setDragDropHint(null);
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("blur", onUp);
         window.removeEventListener("keydown", onKeyDown, true);
       };
 
@@ -1478,7 +1364,8 @@ export function App() {
           worldX,
           worldY,
           docRef.current,
-          layoutsRef.current
+          layoutsRef.current,
+          { dx, dy }
         );
         latestHint = hint;
         setDragDropHint(hint);
@@ -1489,6 +1376,19 @@ export function App() {
         cleanup();
         if (hintToApply) {
           const curDoc = docRef.current;
+          if (hintToApply.placement === "detach") {
+            const nextDoc = detachNodeToRoot(
+              curDoc,
+              hintToApply.draggedId,
+              hintToApply.detachPosition
+            );
+            if (nextDoc !== curDoc) {
+              commitDoc(nextDoc);
+              setSelectedIds([hintToApply.draggedId]);
+              announce("Detached node into independent root");
+            }
+            return;
+          }
           const nextDoc = repositionNode(
             curDoc,
             hintToApply.draggedId,
@@ -1505,6 +1405,7 @@ export function App() {
 
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
+      window.addEventListener("blur", onUp);
       window.addEventListener("keydown", onKeyDown, true);
     },
     [crossLinkSourceId, commitDoc, announce]
@@ -1990,7 +1891,7 @@ export function App() {
               isSelected={selectedIds.includes(node.id)}
               isEditing={editingId === node.id}
               isCrossLinkSource={crossLinkSourceId === node.id}
-              isDragging={dragState?.nodeId === node.id}
+              isDragging={dragState?.nodeId === node.id || draggingRootId === node.id}
               dragOffset={
                 dragState?.nodeId === node.id ? { dx: dragState.dx, dy: dragState.dy } : null
               }
@@ -2021,6 +1922,8 @@ export function App() {
             className={
               dragDropHint.indicator.kind === "line"
                 ? "mf-drop-indicator-line"
+                : dragDropHint.indicator.kind === "detach"
+                ? "mf-drop-indicator-detach"
                 : "mf-drop-indicator-box"
             }
             style={{
@@ -2051,6 +1954,7 @@ export function App() {
       editingId,
       crossLinkSourceId,
       dragState,
+      draggingRootId,
       dragDropHint,
       getZoomScale,
       handleSelectNode,
@@ -2120,6 +2024,7 @@ export function App() {
         lastSavedTime={lastSavedTime}
         saveError={saveError}
         autoSaveIntervalSec={autoSaveIntervalSec}
+        account={account}
         onSelectMap={async (id) => {
           const loaded = await loadMapDual(id);
           if (loaded) {
@@ -2203,22 +2108,32 @@ export function App() {
           void performSave(doc, true);
         }}
         onExportAction={async (fmt) => {
-          if (fmt === "json") exportMapAsJson(doc);
-          else if (fmt === "md") exportMapAsMarkdown(doc);
-          else if (fmt === "mup") exportMapAsMindMup(doc);
-          else if (fmt === "mm") exportMapAsFreeMind(doc);
-          else if (fmt === "svg") exportMapAsSvg(doc, layouts, isDark);
-          else if (fmt === "png") await exportMapAsPng(doc, layouts, isDark);
-          announce(`Exported map as .${fmt}`);
+          try {
+            if (fmt === "json") exportMapAsJson(doc);
+            else if (fmt === "md") exportMapAsMarkdown(doc);
+            else if (fmt === "mup") exportMapAsMindMup(doc);
+            else if (fmt === "mm") exportMapAsFreeMind(doc);
+            else if (fmt === "svg") {
+              await exportMapAsSvg(doc, layouts, isDark, { worldEl: canvasWorldRef.current });
+            } else if (fmt === "png") {
+              await exportMapAsPng(doc, layouts, isDark, { worldEl: canvasWorldRef.current });
+            }
+            announce(`Exported map as .${fmt}`);
+          } catch (err) {
+            announce(err instanceof Error ? err.message : `Failed to export .${fmt}`);
+          }
         }}
         onImportFile={() => importInputRef.current?.click()}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        onOpenSubscription={() => setSubscriptionModalOpen(true)}
+        onOpenAdmin={() => setAdminModalOpen(true)}
       />
 
       <input
         ref={importInputRef}
         type="file"
-        accept=".json,.mup,.md,.markdown,.txt"
+        accept=".json,.mup,.mm,.md,.markdown,.txt"
         hidden
         onChange={async (e) => {
           const file = e.target.files?.[0];
@@ -2231,6 +2146,12 @@ export function App() {
             setPast([]);
             setFuture([]);
             setSelectedIds([imported.rootIds[0]]);
+            setSelectedCrossLinkId(null);
+            initialFitPendingRef.current = true;
+            if (initialFitTimerRef.current) window.clearTimeout(initialFitTimerRef.current);
+            initialFitTimerRef.current = window.setTimeout(() => {
+              initialFitPendingRef.current = false;
+            }, 400);
             await refreshMapList(imported);
             announce(`Imported "${imported.title}"`);
           } catch (err) {
@@ -2264,6 +2185,7 @@ export function App() {
           }}
         >
           <div
+            ref={canvasWorldRef}
             className="mf-canvas-world"
             style={{
               transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.scale})`,
@@ -2314,7 +2236,7 @@ export function App() {
             />
           )}
 
-          {!editingId && !anyDialogOpen && !dragState && selectedIds.length > 0 && (
+          {!editingId && !anyDialogOpen && !dragState && !isMovingNode && !marquee && selectedIds.length > 0 && (
             <FloatingNodeToolbar
               selectedNodes={selectedIds
                 .map((id) => doc.nodes[id])
@@ -2383,6 +2305,7 @@ export function App() {
               }}
               isCrossLinkMode={Boolean(crossLinkSourceId)}
               onToggleCrossLink={handleToggleCrossLinkMode}
+              onDetachNodes={handleDetachSelectedNodes}
               onBatchCollapse={(collapsed) => {
                 commitDoc(setBatchCollapse(doc, selectedIds, collapsed), false);
                 announce(collapsed ? "Collapsed selected branches" : "Expanded selected branches");
@@ -2459,6 +2382,7 @@ export function App() {
           doc={doc}
           selectedIds={selectedIds}
           primarySelectedId={primarySelectedId}
+          account={account}
           onToggleOpen={() => setLlmChatOpen((o) => !o)}
           onClose={() => setLlmChatOpen(false)}
           onApplyDocChange={(nextDoc, focusNodeId) => {
@@ -2474,6 +2398,9 @@ export function App() {
             centerOnNode(nodeId, panelW);
           }}
           onOpenClassicMarkdownPaste={handleTriggerSubtreeModal}
+          onOpenAuth={() => setAuthModalOpen(true)}
+          onOpenSubscription={() => setSubscriptionModalOpen(true)}
+          onRefreshAccount={refreshAccount}
           onAnnounce={announce}
         />
       </div>
@@ -2784,6 +2711,33 @@ export function App() {
         }}
       />
       <ImageLightboxModal image={lightboxImage} onClose={() => setLightboxImage(null)} />
+      <AuthModal
+        open={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        account={account}
+        onRefreshAccount={refreshAccount}
+        onSignInDevUser={signInDevUser}
+        onSignOut={signOut}
+        onOpenSubscription={() => setSubscriptionModalOpen(true)}
+        onOpenAdmin={() => setAdminModalOpen(true)}
+        onAnnounce={announce}
+      />
+      <SubscriptionModal
+        open={subscriptionModalOpen}
+        onClose={() => setSubscriptionModalOpen(false)}
+        account={account}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        onRefreshAccount={refreshAccount}
+        onAnnounce={announce}
+      />
+      {account.isAdmin && (
+        <AdminDashboardModal
+          open={adminModalOpen}
+          onClose={() => setAdminModalOpen(false)}
+          onRefreshAccount={refreshAccount}
+          onAnnounce={announce}
+        />
+      )}
     </div>
   );
 }

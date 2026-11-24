@@ -1,0 +1,190 @@
+rules_version = '2';
+
+// =============================================================================
+// Assumed Data Model — LazyMindmap Cloud Firestore
+// =============================================================================
+//
+// 1. Collection: users/{uid}
+//    Managed exclusively by backend Firebase Admin SDK (clients may only get
+//    their own document; listing and all client writes are forbidden to prevent
+//    user enumeration, privilege escalation, or billing/trial tampering).
+//    Contains user profile, role, status, subscription, and trial quota fields.
+//
+// 2. Subcollection: users/{uid}/maps/{mapId}
+//    Owner-scoped MindMapDocument records.
+//    Fields:
+//      - id: string (required, immutable, == mapId, 1..120 chars)
+//      - title: string (required, 0..300 chars)
+//      - rootIds: list (required, max 200 items)
+//      - nodes: map (required, max 5000 entries)
+//      - crossLinks: list (required, max 2000 items)
+//      - layout: string (required, enum: 'mindmap' | 'tree-right' | 'org-chart')
+//      - theme: string (required, enum: 'ocean' | 'midnight' | 'pastel' | 'solarized' | 'emerald')
+//      - colorMode: string (optional, enum: 'contrast' | 'colorful' | 'custom')
+//      - connectorStyle: string (required, enum: 'bezier' | 'orthogonal' | 'straight')
+//      - horizontalGap: number (optional, range 20..400)
+//      - backgroundPattern: string (optional, enum: 'dots' | 'grid-sm' | 'grid-md' | 'grid-lg' | 'plain')
+//      - createdAt: string (required, immutable, 10..64 chars)
+//      - updatedAt: string (required, 10..64 chars)
+//
+// 3. Server-Only Collections (Firebase Admin SDK exclusively; client access denied):
+//    - byok_vault/{uid}: Encrypted user BYOK API keys
+//    - trial_ledger/{docId}: Device/IP trial quota ledger
+//    - payment_submissions/{docId}: Payment proofs & verification status
+//    - admin_config/{docId}: Encrypted managed/trial keys & system settings
+//    - ai_usage_logs/{docId}: AI usage audit & rate-limit logs
+//
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Helper Functions
+    // =========================================================================
+
+    // Verify the request has a valid Firebase Auth token
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Verify the authenticated user matches the target path UID
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // Verify all required top-level keys are present in the resulting document
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Reject arbitrary/extraneous top-level keys (strict schema enforcement)
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Validate string type and inclusive character length bounds
+    function validStringRange(value, minLen, maxLen) {
+      return value is string && value.size() >= minLen && value.size() <= maxLen;
+    }
+
+    // =========================================================================
+    // Domain Validators
+    // =========================================================================
+
+    // Validate MindMapDocument schema, types, enums, and size bounds on both
+    // create and update to prevent Update Bypass and 1MB DoS payloads.
+    function isValidMindMap(mapId) {
+      let data = request.resource.data;
+      let requiredFields = [
+        'id',
+        'title',
+        'rootIds',
+        'nodes',
+        'crossLinks',
+        'layout',
+        'theme',
+        'connectorStyle',
+        'createdAt',
+        'updatedAt'
+      ];
+      let allowedFields = [
+        'id',
+        'title',
+        'rootIds',
+        'nodes',
+        'crossLinks',
+        'layout',
+        'theme',
+        'colorMode',
+        'connectorStyle',
+        'horizontalGap',
+        'backgroundPattern',
+        'createdAt',
+        'updatedAt'
+      ];
+
+      return hasRequiredFields(requiredFields)
+        && hasOnlyAllowedFields(allowedFields)
+        // Document ID integrity and bounds
+        && validStringRange(data.id, 1, 120)
+        && data.id == mapId
+        // Core map content & bounded collections
+        && validStringRange(data.title, 0, 300)
+        && data.rootIds is list && data.rootIds.size() <= 200
+        && data.nodes is map && data.nodes.size() <= 5000
+        && data.crossLinks is list && data.crossLinks.size() <= 2000
+        // Required presentation enums
+        && data.layout is string && data.layout in ['mindmap', 'tree-right', 'org-chart']
+        && data.theme is string && data.theme in ['ocean', 'midnight', 'pastel', 'solarized', 'emerald']
+        && data.connectorStyle is string && data.connectorStyle in ['bezier', 'orthogonal', 'straight']
+        // Optional presentation fields
+        && (!('colorMode' in data) || (data.colorMode is string && data.colorMode in ['contrast', 'colorful', 'custom']))
+        && (!('horizontalGap' in data) || (data.horizontalGap is number && data.horizontalGap >= 20 && data.horizontalGap <= 400))
+        && (!('backgroundPattern' in data) || (data.backgroundPattern is string && data.backgroundPattern in ['dots', 'grid-sm', 'grid-md', 'grid-lg', 'plain']))
+        // ISO timestamp strings
+        && validStringRange(data.createdAt, 10, 64)
+        && validStringRange(data.updatedAt, 10, 64);
+    }
+
+    // Protect immutable identity and creation metadata during document updates
+    function hasImmutableMindMapFieldsUnchanged() {
+      return request.resource.data.id == resource.data.id
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    // =========================================================================
+    // User Profiles & User-Owned Mind Maps
+    // =========================================================================
+
+    match /users/{uid} {
+      // Users may read only their own profile document; enumeration is blocked
+      allow get: if isOwner(uid);
+      allow list: if false;
+
+      // Backend Admin SDK exclusively manages profile, role, status,
+      // subscription, and trial quota fields.
+      allow create, update, delete: if false;
+
+      // Owner-scoped mind map documents
+      match /maps/{mapId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidMindMap(mapId);
+        allow update: if isOwner(uid) && isValidMindMap(mapId) && hasImmutableMindMapFieldsUnchanged();
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    // =========================================================================
+    // Server-Only Collections (Firebase Admin SDK Only)
+    // =========================================================================
+
+    match /byok_vault/{uid} {
+      allow read, write: if false;
+    }
+
+    match /trial_ledger/{docId} {
+      allow read, write: if false;
+    }
+
+    match /payment_submissions/{docId} {
+      allow read, write: if false;
+    }
+
+    match /admin_config/{docId} {
+      allow read, write: if false;
+    }
+
+    match /ai_usage_logs/{docId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Default Deny Catch-All
+    // =========================================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

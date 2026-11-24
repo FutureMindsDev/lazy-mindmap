@@ -1,10 +1,16 @@
 import type {
+  LayoutNodeInfo,
   MindMapDocument,
   MindMapNode,
   NodeAlign,
   NodeImage,
   NodeShape,
 } from "../types/mindmap";
+import {
+  DEFAULT_HORIZONTAL_GAP,
+  MAX_HORIZONTAL_GAP,
+  MIN_HORIZONTAL_GAP,
+} from "./layoutEngine";
 import type { SubtreeBranch } from "./markdownToSubtree";
 
 export function makeId(prefix = "n"): string {
@@ -327,6 +333,372 @@ export function detachNodeToRoot(
   return next;
 }
 
+export function detachNodesToRoots(
+  doc: MindMapDocument,
+  targetIds: string[],
+  positions?: Record<string, { x: number; y: number }>
+): { doc: MindMapDocument; detachedIds: string[] } {
+  const uniqueNonRoots = Array.from(new Set(targetIds)).filter((id) => {
+    const n = doc.nodes[id];
+    return Boolean(n && n.parentId !== null);
+  });
+  if (uniqueNonRoots.length === 0) return { doc, detachedIds: [] };
+
+  const selectedSet = new Set(uniqueNonRoots);
+  // Only detach top-most selected non-root nodes so selected subtrees remain intact
+  const topDetachable = uniqueNonRoots.filter((id) => {
+    let cur = doc.nodes[id]?.parentId ?? null;
+    while (cur) {
+      if (selectedSet.has(cur)) return false;
+      cur = doc.nodes[cur]?.parentId ?? null;
+    }
+    return true;
+  });
+
+  if (topDetachable.length === 0) return { doc, detachedIds: [] };
+
+  let next = doc;
+  for (const id of topDetachable) {
+    next = detachNodeToRoot(next, id, positions?.[id]);
+  }
+  return { doc: next, detachedIds: topDetachable };
+}
+
+export interface DragDropHint {
+  draggedId: string;
+  targetId: string;
+  placement: "before" | "after" | "inside" | "detach";
+  side?: "left" | "right";
+  detachPosition?: { x: number; y: number };
+  indicator: {
+    kind: "line" | "box" | "detach";
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label?: string;
+  };
+}
+
+function rectEdgeDistance(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number
+): number {
+  const gapX = Math.max(0, ax - (bx + bw), bx - (ax + aw));
+  const gapY = Math.max(0, ay - (by + bh), by - (ay + ah));
+  return Math.hypot(gapX, gapY);
+}
+
+export function computeDragDropHint(
+  draggedId: string,
+  worldX: number,
+  worldY: number,
+  curDoc: MindMapDocument,
+  curLayouts: Record<string, LayoutNodeInfo>,
+  dragOffset?: { dx: number; dy: number }
+): DragDropHint | null {
+  const draggedNode = curDoc.nodes[draggedId];
+  const draggedLayout = curLayouts[draggedId];
+  if (!draggedNode || !draggedLayout) return null;
+
+  const isDraggedRoot = draggedNode.parentId === null;
+  if (isDraggedRoot && curDoc.rootIds.length <= 1) return null;
+
+  const excluded = new Set(getSubtreeIds(curDoc, draggedId, true));
+  const candidates = Object.values(curLayouts).filter((l) => !excluded.has(l.id));
+
+  let bestCand: LayoutNodeInfo | null = null;
+  let bestDist = Infinity;
+  const hitMargin = isDraggedRoot ? 12 : 18;
+
+  for (const cand of candidates) {
+    if (
+      worldX >= cand.x - hitMargin &&
+      worldX <= cand.x + cand.width + hitMargin &&
+      worldY >= cand.y - hitMargin &&
+      worldY <= cand.y + cand.height + hitMargin
+    ) {
+      const cx = cand.x + cand.width / 2;
+      const cy = cand.y + cand.height / 2;
+      const dist = Math.hypot(worldX - cx, worldY - cy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestCand = cand;
+      }
+    }
+  }
+
+  if (!bestCand && !isDraggedRoot) {
+    for (const cand of candidates) {
+      if (cand.depth === 0) continue;
+      if (curDoc.layout !== "org-chart") {
+        if (worldX >= cand.x - 48 && worldX <= cand.x + cand.width + 48) {
+          const cy = cand.y + cand.height / 2;
+          const vDist = Math.abs(worldY - cy);
+          if (vDist <= cand.height / 2 + 56 && vDist < bestDist) {
+            bestDist = vDist;
+            bestCand = cand;
+          }
+        }
+      } else if (worldY >= cand.y - 48 && worldY <= cand.y + cand.height + 48) {
+        const cx = cand.x + cand.width / 2;
+        const hDist = Math.abs(worldX - cx);
+        if (hDist <= cand.width / 2 + 56 && hDist < bestDist) {
+          bestDist = hDist;
+          bestCand = cand;
+        }
+      }
+    }
+  }
+
+  if (bestCand) {
+    if (bestCand.depth === 0) {
+      const candCenterX = bestCand.x + bestCand.width / 2;
+      const side =
+        curDoc.layout === "org-chart"
+          ? undefined
+          : curDoc.layout === "tree-right"
+          ? "right"
+          : worldX < candCenterX
+          ? "left"
+          : "right";
+      const label = isDraggedRoot
+        ? side === "left"
+          ? "Attach to Left"
+          : side === "right"
+          ? "Attach to Right"
+          : "Attach here"
+        : side === "left"
+        ? "Move to Left"
+        : side === "right"
+        ? "Move to Right"
+        : "Attach here";
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "inside",
+        side,
+        indicator: {
+          kind: "box",
+          x: bestCand.x,
+          y: bestCand.y,
+          width: bestCand.width,
+          height: bestCand.height,
+          label,
+        },
+      };
+    }
+
+    const edgeRatio = isDraggedRoot ? 0.28 : 0.34;
+    if (curDoc.layout === "org-chart") {
+      const relX = (worldX - bestCand.x) / Math.max(1, bestCand.width);
+      if (relX < edgeRatio) {
+        return {
+          draggedId,
+          targetId: bestCand.id,
+          placement: "before",
+          indicator: {
+            kind: "line",
+            x: bestCand.x - 10,
+            y: bestCand.y - 4,
+            width: 4,
+            height: bestCand.height + 8,
+            label: isDraggedRoot ? "Insert left" : "Move left",
+          },
+        };
+      }
+      if (relX > 1 - edgeRatio) {
+        return {
+          draggedId,
+          targetId: bestCand.id,
+          placement: "after",
+          indicator: {
+            kind: "line",
+            x: bestCand.x + bestCand.width + 6,
+            y: bestCand.y - 4,
+            width: 4,
+            height: bestCand.height + 8,
+            label: isDraggedRoot ? "Insert right" : "Move right",
+          },
+        };
+      }
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "inside",
+        indicator: {
+          kind: "box",
+          x: bestCand.x,
+          y: bestCand.y,
+          width: bestCand.width,
+          height: bestCand.height,
+          label: "Make child",
+        },
+      };
+    }
+
+    const candSide = bestCand.side === "left" ? "left" : "right";
+    const relY = (worldY - bestCand.y) / Math.max(1, bestCand.height);
+    if (relY < edgeRatio) {
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "before",
+        side: candSide,
+        indicator: {
+          kind: "line",
+          x: bestCand.x,
+          y: bestCand.y - 10,
+          width: bestCand.width,
+          height: 4,
+          label: isDraggedRoot ? "Insert above" : "Move above",
+        },
+      };
+    }
+    if (relY > 1 - edgeRatio) {
+      return {
+        draggedId,
+        targetId: bestCand.id,
+        placement: "after",
+        side: candSide,
+        indicator: {
+          kind: "line",
+          x: bestCand.x,
+          y: bestCand.y + bestCand.height + 6,
+          width: bestCand.width,
+          height: 4,
+          label: isDraggedRoot ? "Insert below" : "Move below",
+        },
+      };
+    }
+    return {
+      draggedId,
+      targetId: bestCand.id,
+      placement: "inside",
+      side: candSide,
+      indicator: {
+        kind: "box",
+        x: bestCand.x,
+        y: bestCand.y,
+        width: bestCand.width,
+        height: bestCand.height,
+        label: "Make child",
+      },
+    };
+  }
+
+  if (draggedNode.parentId === null) {
+    return null;
+  }
+
+  // Dragging far away from the parent into empty canvas space detaches the node into its own root
+  const parentLayout = curLayouts[draggedNode.parentId];
+  if (parentLayout) {
+    const dragX = dragOffset ? draggedLayout.x + dragOffset.dx : worldX - draggedLayout.width / 2;
+    const dragY = dragOffset ? draggedLayout.y + dragOffset.dy : worldY - draggedLayout.height / 2;
+    const dragDist = dragOffset
+      ? Math.hypot(dragOffset.dx, dragOffset.dy)
+      : Math.hypot(dragX - draggedLayout.x, dragY - draggedLayout.y);
+    const initialEdgeDist = rectEdgeDistance(
+      draggedLayout.x,
+      draggedLayout.y,
+      draggedLayout.width,
+      draggedLayout.height,
+      parentLayout.x,
+      parentLayout.y,
+      parentLayout.width,
+      parentLayout.height
+    );
+    const currentEdgeDist = rectEdgeDistance(
+      dragX,
+      dragY,
+      draggedLayout.width,
+      draggedLayout.height,
+      parentLayout.x,
+      parentLayout.y,
+      parentLayout.width,
+      parentLayout.height
+    );
+    const hGap = Math.max(
+      MIN_HORIZONTAL_GAP,
+      Math.min(MAX_HORIZONTAL_GAP, curDoc.horizontalGap ?? DEFAULT_HORIZONTAL_GAP)
+    );
+    const detachGapThreshold = Math.max(220, hGap + 140);
+
+    if (
+      dragDist >= 140 &&
+      currentEdgeDist >= detachGapThreshold &&
+      (currentEdgeDist >= initialEdgeDist + 80 || dragDist >= 260)
+    ) {
+      return {
+        draggedId,
+        targetId: draggedNode.parentId,
+        placement: "detach",
+        detachPosition: {
+          x: Math.round(dragX + draggedLayout.width / 2),
+          y: Math.round(dragY + draggedLayout.height / 2),
+        },
+        indicator: {
+          kind: "detach",
+          x: dragX - 4,
+          y: dragY - 4,
+          width: draggedLayout.width + 8,
+          height: draggedLayout.height + 8,
+          label: "Release to detach",
+        },
+      };
+    }
+  }
+
+  if (curDoc.layout !== "org-chart") {
+    const rootLayout = curLayouts[draggedLayout.rootId];
+    if (rootLayout) {
+      const rootCenterX = rootLayout.x + rootLayout.width / 2;
+      const currentSide = draggedLayout.side === "left" ? "left" : "right";
+      if (currentSide === "right" && worldX < rootCenterX - 18) {
+        return {
+          draggedId,
+          targetId: rootLayout.id,
+          placement: "inside",
+          side: "left",
+          indicator: {
+            kind: "box",
+            x: rootLayout.x,
+            y: rootLayout.y,
+            width: rootLayout.width,
+            height: rootLayout.height,
+            label: "Move to Left",
+          },
+        };
+      }
+      if (currentSide === "left" && worldX > rootCenterX + 18) {
+        return {
+          draggedId,
+          targetId: rootLayout.id,
+          placement: "inside",
+          side: "right",
+          indicator: {
+            kind: "box",
+            x: rootLayout.x,
+            y: rootLayout.y,
+            width: rootLayout.width,
+            height: rootLayout.height,
+            label: "Move to Right",
+          },
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 export function deleteNodes(
   doc: MindMapDocument,
   selectedIds: string[]
@@ -565,15 +937,31 @@ export function repositionNode(
 ): MindMapDocument {
   const dragged = doc.nodes[draggedId];
   const target = doc.nodes[targetId];
-  if (!dragged || !target || !dragged.parentId || draggedId === targetId) return doc;
+  if (!dragged || !target || draggedId === targetId) return doc;
+
+  const isDetachedRoot = dragged.parentId === null;
+  if (isDetachedRoot && doc.rootIds.length <= 1) return doc;
 
   const subtreeIds = getSubtreeIds(doc, draggedId, true);
   if (subtreeIds.includes(targetId)) return doc;
 
   const next = cloneDocument(doc);
   const oldParentId = dragged.parentId;
-  const oldRootId = doc.nodes[oldParentId]?.parentId === null ? oldParentId : null;
+  const oldRootId =
+    oldParentId && doc.nodes[oldParentId]?.parentId === null ? oldParentId : null;
   if (oldRootId) normalizeRootChildrenSides(next, oldRootId);
+
+  const detachFromOldLocation = () => {
+    if (oldParentId) {
+      const oldParent = next.nodes[oldParentId];
+      if (oldParent) {
+        oldParent.childrenIds = oldParent.childrenIds.filter((cid) => cid !== draggedId);
+      }
+    } else {
+      next.rootIds = next.rootIds.filter((rid) => rid !== draggedId);
+      delete next.nodes[draggedId].position;
+    }
+  };
 
   if (placement === "inside") {
     const newParent = next.nodes[targetId];
@@ -582,8 +970,21 @@ export function repositionNode(
     let resolvedSide: "left" | "right" | undefined;
     if (newParent.parentId === null) {
       normalizeRootChildrenSides(next, newParent.id);
-      resolvedSide =
-        targetSide ?? (next.layout === "tree-right" ? "right" : getEffectiveNodeSide(doc, draggedId));
+      if (targetSide) {
+        resolvedSide = targetSide;
+      } else if (next.layout === "tree-right") {
+        resolvedSide = "right";
+      } else if (isDetachedRoot) {
+        const rightCount = newParent.childrenIds.filter(
+          (cid) => next.nodes[cid]?.side === "right"
+        ).length;
+        const leftCount = newParent.childrenIds.filter(
+          (cid) => next.nodes[cid]?.side === "left"
+        ).length;
+        resolvedSide = rightCount <= leftCount ? "right" : "left";
+      } else {
+        resolvedSide = getEffectiveNodeSide(doc, draggedId);
+      }
       if (next.layout === "tree-right" && resolvedSide === "left") {
         next.layout = "mindmap";
       }
@@ -593,12 +994,9 @@ export function repositionNode(
 
     const sameParent = oldParentId === targetId;
     const sameSide = !resolvedSide || getEffectiveNodeSide(doc, draggedId) === resolvedSide;
-    if (sameParent && sameSide) return doc;
+    if (!isDetachedRoot && sameParent && sameSide) return doc;
 
-    const oldParent = next.nodes[oldParentId];
-    if (oldParent) {
-      oldParent.childrenIds = oldParent.childrenIds.filter((cid) => cid !== draggedId);
-    }
+    detachFromOldLocation();
     next.nodes[draggedId].parentId = targetId;
     newParent.collapsed = false;
     if (!newParent.childrenIds.includes(draggedId)) {
@@ -631,10 +1029,7 @@ export function repositionNode(
     }
   }
 
-  const oldParent = next.nodes[oldParentId];
-  if (oldParent) {
-    oldParent.childrenIds = oldParent.childrenIds.filter((cid) => cid !== draggedId);
-  }
+  detachFromOldLocation();
   next.nodes[draggedId].parentId = newParentId;
   const targetIdx = newParent.childrenIds.indexOf(targetId);
   const insertIdx = targetIdx >= 0 ? (placement === "before" ? targetIdx : targetIdx + 1) : newParent.childrenIds.length;
@@ -644,7 +1039,7 @@ export function repositionNode(
   }
 
   // Avoid committing a no-op if parent, side, and visual sibling order did not change
-  if (oldParentId === newParentId) {
+  if (!isDetachedRoot && oldParentId === newParentId) {
     const prevOrder = getVisualSiblingIds(doc, draggedId);
     const nextOrder = getVisualSiblingIds(next, draggedId);
     const prevSide = getEffectiveNodeSide(doc, draggedId);

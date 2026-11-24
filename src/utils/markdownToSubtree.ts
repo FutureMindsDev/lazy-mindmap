@@ -127,6 +127,12 @@ export function parseMarkdownToSubtree(markdown: string): SubtreeBranch[] {
       continue;
     }
 
+    // Keep Markdown task checklist lines inside the active node so they render as checkboxes
+    if (/^\s*(?:[-*+]|\d+\.)\s+\[[ xX]\]\s+/.test(rawLine) && getActiveNode()) {
+      currentBuffer.push(rawLine);
+      continue;
+    }
+
     // Bullet or numbered list item
     const listMatch = rawLine.match(/^(\s*)(?:[-*+]|\d+\.)\s+(.+)$/);
     if (listMatch) {

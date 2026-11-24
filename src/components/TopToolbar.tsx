@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Crown,
   Download,
   FilePlus2,
   Hand,
@@ -17,12 +18,14 @@ import {
   Redo2,
   Save,
   Search,
+  Shield,
   SlidersHorizontal,
   Sparkles,
   Sun,
   Trash2,
   Undo2,
   Upload,
+  UserCircle2,
   X,
 } from "lucide-react";
 import type {
@@ -34,6 +37,7 @@ import type {
   MapSummary,
   SaveState,
   ThemeId,
+  UserAccountState,
 } from "../types/mindmap";
 import { MAX_HORIZONTAL_GAP, MIN_HORIZONTAL_GAP } from "../utils/layoutEngine";
 import { MIND_THEMES } from "../utils/themes";
@@ -58,6 +62,7 @@ interface TopToolbarProps {
   lastSavedTime: string | null;
   saveError: string | null;
   autoSaveIntervalSec: number;
+  account: UserAccountState;
   onSelectMap: (id: string) => void;
   onCreateNewMap: () => void;
   onDeleteCurrentMap: () => void;
@@ -79,6 +84,9 @@ interface TopToolbarProps {
   onExportAction: (fmt: string) => void;
   onImportFile: () => void;
   onOpenShortcuts: () => void;
+  onOpenAuth: () => void;
+  onOpenSubscription: () => void;
+  onOpenAdmin: () => void;
 }
 
 const EDGE_DISTANCE_PRESETS = [
@@ -193,6 +201,7 @@ export function TopToolbar({
   lastSavedTime,
   saveError,
   autoSaveIntervalSec,
+  account,
   onSelectMap,
   onCreateNewMap,
   onDeleteCurrentMap,
@@ -214,6 +223,9 @@ export function TopToolbar({
   onExportAction,
   onImportFile,
   onOpenShortcuts,
+  onOpenAuth,
+  onOpenSubscription,
+  onOpenAdmin,
 }: TopToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -374,6 +386,31 @@ export function TopToolbar({
         </button>
 
         <button
+          type="button"
+          className="mf-btn mf-account-pill"
+          title={
+            account.authenticated
+              ? `${account.user?.email || "Account"} — Manage profile & plan`
+              : "Sign in with Email, Google, or Facebook"
+          }
+          aria-label={
+            account.authenticated
+              ? `Account (${account.user?.displayName || account.user?.email || "Signed in"})`
+              : "Sign in"
+          }
+          onClick={onOpenAuth}
+        >
+          <UserCircle2 size={15} aria-hidden="true" />
+          <span>
+            {account.authenticated
+              ? account.user?.displayName ||
+                account.user?.email?.split("@")[0] ||
+                "Account"
+              : "Sign In"}
+          </span>
+        </button>
+
+        <button
           ref={menuTriggerRef}
           type="button"
           className="mf-btn mf-hamburger-btn"
@@ -492,7 +529,7 @@ export function TopToolbar({
                       }}
                     >
                       <Upload size={14} aria-hidden="true" />
-                      <span>Import (.json/.mup/.md)</span>
+                      <span>Import (.json/.mup/.mm/.md)</span>
                     </button>
                     <button
                       type="button"
@@ -723,6 +760,30 @@ export function TopToolbar({
                       <Sparkles size={14} aria-hidden="true" />
                       <span>AI Assistant Chat</span>
                     </button>
+                    <button
+                      type="button"
+                      className="mf-menu-item-btn"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onOpenSubscription();
+                      }}
+                    >
+                      <Crown size={14} aria-hidden="true" />
+                      <span>AI Plan &amp; Billing (KBZPay)</span>
+                    </button>
+                    {account.isAdmin && (
+                      <button
+                        type="button"
+                        className="mf-menu-item-btn"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onOpenAdmin();
+                        }}
+                      >
+                        <Shield size={14} aria-hidden="true" />
+                        <span>Admin Dashboard</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="mf-menu-item-btn"

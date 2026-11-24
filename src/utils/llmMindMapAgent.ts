@@ -1,4 +1,6 @@
 import type {
+  AiAccessMode,
+  ByokStorageMode,
   LlmChatFile,
   LlmChatMessage,
   LlmConfig,
@@ -8,6 +10,8 @@ import type {
   MindMapDocument,
   MindMapNode,
 } from "../types/mindmap";
+import { getDeviceFingerprint } from "./deviceFingerprint";
+import { getActiveAuthToken } from "./firebaseClient";
 import { parseMarkdownToSubtree, type SubtreeBranch } from "./markdownToSubtree";
 import { fileToDataUrl, uploadFileDual } from "./storage";
 import { cloneDocument, insertSubtreeBranches, makeId } from "./treeOps";
@@ -35,8 +39,14 @@ export const LLM_PROVIDER_META: Record<
   },
   gemini: {
     label: "Google Gemini",
-    defaultModel: "gemini-2.5-flash",
-    models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    defaultModel: "gemini-3.1-flash-lite",
+    models: [
+      "gemini-3.1-flash-lite",
+      "gemini-3.1-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-pro",
+    ],
     keyPlaceholder: "AIza...",
   },
   anthropic: {
@@ -55,22 +65,37 @@ export const LLM_PROVIDER_META: Record<
 };
 
 export const DEFAULT_LLM_CONFIG: LlmConfig = {
-  provider: "openai",
+  provider: "gemini",
   apiKey: "",
-  model: LLM_PROVIDER_META.openai.defaultModel,
+  model: LLM_PROVIDER_META.gemini.defaultModel,
   baseUrl: "",
+  mode: "trial",
+  byokStorage: "vault",
 };
 
 export class LlmApiError extends Error {
   status?: number;
   rawError?: string;
+  code?: string;
 
-  constructor(message: string, status?: number, rawError?: string) {
+  constructor(message: string, status?: number, rawError?: string, code?: string) {
     super(message);
     this.name = "LlmApiError";
     this.status = status;
     this.rawError = rawError;
+    this.code = code;
   }
+}
+
+function sanitizeConfigForPersistence(config: LlmConfig): LlmConfig {
+  return {
+    provider: config.provider,
+    apiKey: "", // SECURITY: Never persist plaintext API keys in localStorage
+    model: config.model,
+    baseUrl: config.baseUrl || "",
+    mode: config.mode || "trial",
+    byokStorage: config.byokStorage || "vault",
+  };
 }
 
 export function loadLlmConfig(): LlmConfig {
@@ -79,16 +104,33 @@ export function loadLlmConfig(): LlmConfig {
     if (!raw) return { ...DEFAULT_LLM_CONFIG };
     const parsed = JSON.parse(raw) as Partial<LlmConfig>;
     const provider: LlmProviderId =
-      parsed.provider && parsed.provider in LLM_PROVIDER_META ? parsed.provider : "openai";
-    return {
+      parsed.provider && parsed.provider in LLM_PROVIDER_META ? parsed.provider : "gemini";
+    const mode: AiAccessMode =
+      parsed.mode &&
+      ["managed", "trial", "byok_vault", "byok_session"].includes(parsed.mode)
+        ? parsed.mode
+        : "trial";
+    const byokStorage: ByokStorageMode =
+      parsed.byokStorage === "session" ? "session" : "vault";
+
+    const cleaned: LlmConfig = {
       provider,
-      apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
+      apiKey: "", // Always cleared from localStorage; kept only in RAM or encrypted server vault
       model:
         typeof parsed.model === "string" && parsed.model.trim()
           ? parsed.model
           : LLM_PROVIDER_META[provider].defaultModel,
       baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : "",
+      mode,
+      byokStorage,
     };
+
+    // Immediately scrub legacy plaintext keys if present in localStorage
+    if (typeof parsed.apiKey === "string" && parsed.apiKey.trim()) {
+      localStorage.setItem(LLM_CONFIG_STORAGE_KEY, JSON.stringify(cleaned));
+    }
+
+    return cleaned;
   } catch {
     return { ...DEFAULT_LLM_CONFIG };
   }
@@ -96,7 +138,10 @@ export function loadLlmConfig(): LlmConfig {
 
 export function saveLlmConfig(config: LlmConfig): void {
   try {
-    localStorage.setItem(LLM_CONFIG_STORAGE_KEY, JSON.stringify(config));
+    localStorage.setItem(
+      LLM_CONFIG_STORAGE_KEY,
+      JSON.stringify(sanitizeConfigForPersistence(config))
+    );
   } catch {
     // Ignore storage quota errors
   }
@@ -934,10 +979,16 @@ export async function callLlmProvider(params: {
   config: LlmConfig;
   systemPrompt: string;
   messages: LlmChatMessage[];
+  mode?: AiAccessMode;
+  authToken?: string | null;
+  deviceFingerprint?: string | null;
+  onUsageUpdate?: (usage: Record<string, unknown>) => void;
 }): Promise<string> {
   const { config, systemPrompt, messages } = params;
-  const apiKey = config.apiKey.trim();
-  if (!apiKey) {
+  const effectiveMode: AiAccessMode = params.mode || config.mode || "byok_session";
+  const apiKey = (config.apiKey || "").trim();
+
+  if (effectiveMode === "byok_session" && !apiKey) {
     throw new LlmApiError(
       "Missing LLM provider API key. Please add your API key in the assistant settings.",
       400
@@ -960,15 +1011,31 @@ export async function callLlmProvider(params: {
       })),
     }));
 
+  let token = params.authToken ?? null;
+  let fp = params.deviceFingerprint ?? null;
+  try {
+    if (token === null) token = await getActiveAuthToken();
+  } catch {}
+  try {
+    if (fp === null) fp = await getDeviceFingerprint();
+  } catch {}
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (fp) headers["X-Device-Fingerprint"] = fp;
+  if (effectiveMode === "byok_session" && apiKey) {
+    headers["X-BYOK-Key"] = apiKey;
+  }
+
   // 1. Try local backend proxy first (/api/llm/chat)
   let shouldFallbackDirect = false;
   try {
     const proxyRes = await fetch("/api/llm/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
+        mode: effectiveMode,
         provider: config.provider,
-        apiKey,
         model: config.model.trim() || LLM_PROVIDER_META[config.provider].defaultModel,
         baseUrl: config.baseUrl?.trim(),
         systemPrompt,
@@ -983,14 +1050,23 @@ export async function callLlmProvider(params: {
       if (!proxyRes.ok) {
         let errMsg = extractDirectError(rawBody, proxyRes.statusText);
         let rawError = rawBody;
+        let code: string | undefined;
         try {
-          const parsed = JSON.parse(rawBody) as { error?: string; rawError?: string };
+          const parsed = JSON.parse(rawBody) as {
+            error?: string;
+            rawError?: string;
+            code?: string;
+          };
           if (parsed.error) errMsg = parsed.error;
           if (parsed.rawError) rawError = parsed.rawError;
+          if (parsed.code) code = parsed.code;
         } catch {}
-        throw new LlmApiError(errMsg, proxyRes.status, rawError);
+        throw new LlmApiError(errMsg, proxyRes.status, rawError, code);
       }
-      const data = JSON.parse(rawBody) as { text?: string };
+      const data = JSON.parse(rawBody) as { text?: string; usage?: Record<string, unknown> };
+      if (data.usage && params.onUsageUpdate) {
+        params.onUsageUpdate(data.usage);
+      }
       return String(data.text || "");
     }
   } catch (err) {
@@ -1000,6 +1076,13 @@ export async function callLlmProvider(params: {
 
   if (!shouldFallbackDirect) {
     throw new LlmApiError("Failed to contact LLM proxy.");
+  }
+
+  if (effectiveMode !== "byok_session") {
+    throw new LlmApiError(
+      "Backend server (/api/llm/chat) is unreachable for managed, trial, or vaulted BYOK requests.",
+      502
+    );
   }
 
   // 2. Direct browser fallback when running without backend proxy (e.g., static hosting)

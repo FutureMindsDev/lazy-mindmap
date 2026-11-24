@@ -28,6 +28,7 @@ import {
   Spline,
   Trash2,
   Type,
+  Unlink,
   X,
 } from "lucide-react";
 import type {
@@ -83,6 +84,7 @@ interface FloatingNodeToolbarProps {
   onToggleStickers: () => void;
   isCrossLinkMode?: boolean;
   onToggleCrossLink: () => void;
+  onDetachNodes: () => void;
   onBatchCollapse: (collapsed: boolean) => void;
   onDuplicateNodes: () => void;
   onDeleteNodes: () => void;
@@ -119,6 +121,7 @@ export function FloatingNodeToolbar({
   onToggleStickers,
   isCrossLinkMode = false,
   onToggleCrossLink,
+  onDetachNodes,
   onBatchCollapse,
   onDuplicateNodes,
   onDeleteNodes,
@@ -132,6 +135,7 @@ export function FloatingNodeToolbar({
   const isMulti = selectedNodes.length > 1;
   const isAll = isMulti && selectedNodes.length >= totalVisibleCount;
   const isRoot = primary?.parentId === null;
+  const canDetach = selectedNodes.some((n) => n.parentId !== null);
   const useCustomColors = colorMode === "custom";
   const rawCustomFill = primary?.style?.color;
   const hasExplicitNoFill = useCustomColors && rawCustomFill === "none";
@@ -496,6 +500,29 @@ export function FloatingNodeToolbar({
               <span className="mf-ctx-label">Link</span>
             </button>
           )}
+          <button
+            type="button"
+            className="mf-ctx-btn"
+            aria-label={
+              canDetach
+                ? isMulti
+                  ? "Detach selected nodes into independent roots (D)"
+                  : "Detach node into independent root (D)"
+                : "Already an independent root node"
+            }
+            aria-disabled={!canDetach ? "true" : undefined}
+            title={
+              canDetach
+                ? isMulti
+                  ? "Detach selected nodes into floating roots (D)"
+                  : "Detach node from parent into floating root (D)"
+                : "Already a root node"
+            }
+            onClick={() => canDetach && onDetachNodes()}
+          >
+            <Unlink size={14} aria-hidden="true" />
+            <span className="mf-ctx-label">Detach</span>
+          </button>
           <button
             type="button"
             className="mf-ctx-btn"

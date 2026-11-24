@@ -2,7 +2,10 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadServerEnv } from "./env.mjs";
 import { createApiMiddleware } from "./api.mjs";
+
+loadServerEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");

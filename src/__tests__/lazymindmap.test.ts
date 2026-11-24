@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LayoutNodeInfo } from "../types/mindmap";
+import {
+  buildExportSvgString,
+  importMapFromFileContent,
+  serializeMapAsFreeMind,
+  serializeMapAsMarkdown,
+  serializeMapAsMindMup,
+} from "../utils/exporters";
 import { extractMarkdownFromHtml, renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   callLlmProvider,
@@ -32,8 +39,10 @@ import {
   addSiblingNode,
   applyCollapseState,
   collapseToLevel,
+  computeDragDropHint,
   createBlankMap,
   createInitialMap,
+  detachNodesToRoots,
   detachNodeToRoot,
   expandAllNodes,
   getMaxDepth,
@@ -797,13 +806,22 @@ describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
     };
   };
 
-  const getMinBoxGap = (
-    a: { minX: number; minY: number; maxX: number; maxY: number },
-    b: { minX: number; minY: number; maxX: number; maxY: number }
+  const getMinNodePairGap = (
+    layouts: Record<string, LayoutNodeInfo>,
+    rootA: string,
+    rootB: string
   ) => {
-    const dx = Math.max(a.minX - b.maxX, b.minX - a.maxX);
-    const dy = Math.max(a.minY - b.maxY, b.minY - a.maxY);
-    return Math.max(dx, dy);
+    const nodesA = Object.values(layouts).filter((n) => n.rootId === rootA);
+    const nodesB = Object.values(layouts).filter((n) => n.rootId === rootB);
+    let minGap = Infinity;
+    for (const a of nodesA) {
+      for (const b of nodesB) {
+        const dx = Math.max(a.x - (b.x + b.width), b.x - (a.x + a.width));
+        const dy = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height));
+        minGap = Math.min(minGap, Math.max(dx, dy));
+      }
+    }
+    return minGap;
   };
 
   it("automatically separates overlapping detached mind maps with at least ROOT_TREE_GAP across all layout modes", () => {
@@ -820,9 +838,7 @@ describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
 
     for (const mode of ["mindmap", "tree-right", "org-chart"] as const) {
       const layouts = computeMindMapLayout({ ...doc, layout: mode });
-      const b1 = getTreeBounds(layouts, root1);
-      const b2 = getTreeBounds(layouts, root2);
-      expect(getMinBoxGap(b1, b2)).toBeGreaterThanOrEqual(ROOT_TREE_GAP);
+      expect(getMinNodePairGap(layouts, root1, root2)).toBeGreaterThanOrEqual(ROOT_TREE_GAP);
     }
   });
 
@@ -847,10 +863,12 @@ describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
     }
 
     const layouts = computeMindMapLayout(doc);
-    const bounds = [r1, r2, r3].map((id) => getTreeBounds(layouts, id));
-    for (let i = 0; i < bounds.length; i++) {
-      for (let j = i + 1; j < bounds.length; j++) {
-        expect(getMinBoxGap(bounds[i], bounds[j])).toBeGreaterThanOrEqual(ROOT_TREE_GAP);
+    const rootList = [r1, r2, r3];
+    for (let i = 0; i < rootList.length; i++) {
+      for (let j = i + 1; j < rootList.length; j++) {
+        expect(getMinNodePairGap(layouts, rootList[i], rootList[j])).toBeGreaterThanOrEqual(
+          ROOT_TREE_GAP
+        );
       }
     }
 
@@ -862,6 +880,37 @@ describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
     const farLayout = farLayouts[farDet.newId];
     expect(farLayout.x + farLayout.width / 2).toBe(1800);
     expect(farLayout.y + farLayout.height / 2).toBe(1400);
+  });
+
+  it("allows detached roots to move freely above and into open pockets around another tree without a bounding-box ceiling wall", () => {
+    let doc = createInitialMap();
+    const r1 = doc.rootIds[0];
+    const baseLayouts = computeMindMapLayout(doc);
+    const mainBounds = getTreeBounds(baseLayouts, r1);
+
+    // 1. Placing a detached root in open whitespace directly above the main tree stays above it
+    const abovePos = { x: 0, y: Math.round(mainBounds.minY - 140) };
+    const detAbove = addDetachedRootNode(doc, abovePos, "Moved Above");
+    const aboveLayouts = computeMindMapLayout(detAbove.doc);
+    const placedAbove = aboveLayouts[detAbove.newId];
+    expect(placedAbove.y + placedAbove.height / 2).toBe(abovePos.y);
+
+    // 2. Placing a detached root inside an open whitespace pocket beside shorter branches (inside outer bbox, no node collision) stays put
+    const pocketPos = { x: Math.round(mainBounds.maxX - 40), y: Math.round(mainBounds.minY - 90) };
+    const detPocket = addDetachedRootNode(doc, pocketPos, "Open Pocket");
+    const pocketLayouts = computeMindMapLayout(detPocket.doc);
+    const placedPocket = pocketLayouts[detPocket.newId];
+    expect(placedPocket.y + placedPocket.height / 2).toBe(pocketPos.y);
+
+    // 3. During active drag (ignoreOverlapRootId), the dragged root moves freely even across another tree without snapping back
+    const midCrossPos = { x: 0, y: 0 };
+    const detDrag = addDetachedRootNode(doc, midCrossPos, "Dragging Across");
+    const dragLayouts = computeMindMapLayout(detDrag.doc, undefined, false, {
+      ignoreOverlapRootId: detDrag.newId,
+    });
+    const draggingInfo = dragLayouts[detDrag.newId];
+    expect(Math.round(draggingInfo.x + draggingInfo.width / 2)).toBe(0);
+    expect(Math.round(draggingInfo.y + draggingInfo.height / 2)).toBe(0);
   });
 
   it("supports explicit no-fill ('none') color option without leaking into branch/edge colors", () => {
@@ -910,5 +959,311 @@ describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
     }
 
     expect(computeFitViewport({}, 1200, 800)).toBeNull();
+  });
+});
+
+describe("Export / Import Fidelity & Rich Visual SVG Export", () => {
+  it("imports multi-root plain Markdown without wrapping in an extra root node and keeps checklists inside their node", () => {
+    const md = `# First Map Root
+## Interactive Tasks
+- [x] Universal LLM math pipeline
+- [ ] Press \`Space\` to edit me
+
+# Second Independent Root
+## Marketing
+- Social Media
+- Print`;
+
+    const imported = importMapFromFileContent("notes.md", md);
+    expect(imported.rootIds).toHaveLength(2);
+    const rootTexts = imported.rootIds.map((rid) => imported.nodes[rid].text);
+    expect(rootTexts).toEqual(["First Map Root", "Second Independent Root"]);
+
+    // First root has 1 child ("Interactive Tasks") containing the task checkboxes inline
+    const firstRoot = imported.nodes[imported.rootIds[0]];
+    expect(firstRoot.childrenIds).toHaveLength(1);
+    const taskNode = imported.nodes[firstRoot.childrenIds[0]];
+    expect(taskNode.text).toContain("- [x] Universal LLM math pipeline");
+    expect(taskNode.text).toContain("- [ ] Press `Space` to edit me");
+    expect(taskNode.childrenIds).toHaveLength(0);
+
+    // Second root preserves its exact hierarchy
+    const secondRoot = imported.nodes[imported.rootIds[1]];
+    expect(secondRoot.childrenIds).toHaveLength(1);
+    const mktNode = imported.nodes[secondRoot.childrenIds[0]];
+    expect(mktNode.text).toBe("Marketing");
+    expect(mktNode.childrenIds.map((cid) => imported.nodes[cid].text)).toEqual([
+      "Social Media",
+      "Print",
+    ]);
+  });
+
+  it("preserves exact multi-root hierarchy, colors, formatting, stickers, and cross-links across .md, .mup, .mm, and .json round-trips", () => {
+    let doc = createInitialMap();
+    const detached = addDetachedRootNode(doc, { x: 420, y: 520 }, "Second Root 🚀");
+    doc = detached.doc;
+    const secondChild = addChildNode(doc, detached.newId, "**Bold** and $E=mc^2$");
+    doc = secondChild.doc;
+    doc = setNodesColor(doc, ["node-math", secondChild.newId], {
+      color: "#1e293b",
+      borderColor: "#ec4899",
+      edgeColor: "#ec4899",
+      textColor: "#f8fafc",
+    });
+    doc.nodes["node-math"].notes = "Extended physics notes";
+    doc.nodes[secondChild.newId].style = {
+      ...doc.nodes[secondChild.newId].style,
+      shape: "cloud",
+      fontSize: 18,
+      align: "center",
+    };
+
+    // 1. Markdown round-trip (unmodified)
+    const mdRaw = serializeMapAsMarkdown(doc);
+    const fromMd = importMapFromFileContent("export.md", mdRaw);
+    expect(fromMd.rootIds).toHaveLength(2);
+    expect(fromMd.colorMode).toBe("custom");
+    expect(fromMd.nodes["node-math"]?.style?.color).toBe("#1e293b");
+    expect(fromMd.nodes["node-math"]?.style?.edgeColor).toBe("#ec4899");
+    expect(fromMd.nodes["node-math"]?.notes).toBe("Extended physics notes");
+    expect(fromMd.crossLinks).toHaveLength(doc.crossLinks.length);
+
+    // Edited Markdown export falls back to parsing edited Markdown without extra wrapper node
+    const editedMd = mdRaw.replace("Second Root 🚀", "Renamed Root ✨");
+    const fromEditedMd = importMapFromFileContent("edited.md", editedMd);
+    expect(fromEditedMd.rootIds).toHaveLength(2);
+    expect(fromEditedMd.nodes[fromEditedMd.rootIds[1]].text).toBe("Renamed Root ✨");
+
+    // 2. MindMup (.mup) round-trip
+    const mupRaw = serializeMapAsMindMup(doc);
+    const fromMup = importMapFromFileContent("export.mup", mupRaw);
+    expect(fromMup.rootIds).toHaveLength(2);
+    expect(fromMup.colorMode).toBe("custom");
+    const mupSecondRoot = fromMup.nodes[fromMup.rootIds[1]];
+    expect(mupSecondRoot.text).toBe("Second Root 🚀");
+    expect(mupSecondRoot.position).toEqual({ x: 420, y: 520 });
+    const mupSecondChild = fromMup.nodes[mupSecondRoot.childrenIds[0]];
+    expect(mupSecondChild.style?.color).toBe("#1e293b");
+    expect(mupSecondChild.style?.edgeColor).toBe("#ec4899");
+    expect(mupSecondChild.style?.shape).toBe("cloud");
+    expect(mupSecondChild.style?.fontSize).toBe(18);
+    expect(fromMup.crossLinks).toHaveLength(doc.crossLinks.length);
+
+    // External MindMup file with background color automatically activates colorMode = "custom"
+    const extMup = JSON.stringify({
+      formatVersion: 3,
+      title: "External Map",
+      ideas: {
+        "1": {
+          id: 1,
+          title: "Central",
+          attr: { style: { background: "#ff5500", color: "#ffffff" } },
+          ideas: { "1": { id: 2, title: "Child A" } },
+        },
+      },
+    });
+    const fromExtMup = importMapFromFileContent("external.mup", extMup);
+    expect(fromExtMup.rootIds).toHaveLength(1);
+    expect(fromExtMup.colorMode).toBe("custom");
+    expect(fromExtMup.nodes[fromExtMup.rootIds[0]].style?.color).toBe("#ff5500");
+
+    // 3. FreeMind (.mm) round-trip
+    const mmRaw = serializeMapAsFreeMind(doc);
+    const fromMm = importMapFromFileContent("export.mm", mmRaw);
+    expect(fromMm.rootIds).toHaveLength(2);
+    expect(fromMm.colorMode).toBe("custom");
+    const mmSecondRoot = fromMm.nodes[fromMm.rootIds[1]];
+    expect(mmSecondRoot.text).toBe("Second Root 🚀");
+    const mmSecondChild = fromMm.nodes[mmSecondRoot.childrenIds[0]];
+    expect(mmSecondChild.style?.color).toBe("#1e293b");
+    expect(mmSecondChild.style?.edgeColor).toBe("#ec4899");
+    expect(mmSecondChild.style?.fontSize).toBe(18);
+    expect(fromMm.crossLinks).toHaveLength(doc.crossLinks.length);
+
+    // 4. Native JSON round-trip
+    const fromJson = importMapFromFileContent("export.json", JSON.stringify(doc));
+    expect(fromJson.rootIds).toHaveLength(2);
+    expect(fromJson.colorMode).toBe("custom");
+    expect(fromJson.nodes[secondChild.newId].style?.color).toBe("#1e293b");
+  });
+
+  it("includes images, emojis/stickers, code snippets, formatted KaTeX math, Mermaid diagrams, and cross-links in rich SVG export", () => {
+    const doc = createInitialMap();
+    doc.nodes["node-media"].images = [
+      { id: "img-export", url: "data:image/png;base64,iVBORw0KGgo=", name: "diagram.png", width: 200 },
+    ];
+    const layouts = computeMindMapLayout(doc);
+    const svg = buildExportSvgString(doc, layouts, false);
+
+    expect(svg).toContain("<foreignObject");
+    expect(svg).toContain("data:image/png;base64,iVBORw0KGgo=");
+    expect(svg).toContain("🚀");
+    expect(svg).toContain("🧮");
+    expect(svg).toContain('class="katex"');
+    expect(svg).toContain("mf-code-block");
+    expect(svg).toContain("hljs-keyword");
+    expect(svg).toContain("mf-mermaid-diagram");
+    expect(svg).toContain("supports math");
+  });
+});
+
+describe("Node Detaching (Floating Toolbar Batch & Drag Far Away)", () => {
+  it("detaches selected non-root nodes into independent roots while preserving selected subtrees", () => {
+    const doc = createInitialMap();
+    // Selecting parent ("node-math") + its descendant ("node-math-chatgpt") + root should detach only "node-math" with its subtree intact
+    const res = detachNodesToRoots(
+      doc,
+      [doc.rootIds[0], "node-math", "node-math-chatgpt"],
+      { "node-math": { x: 640, y: 320 } }
+    );
+    expect(res.detachedIds).toEqual(["node-math"]);
+    expect(res.doc.rootIds).toContain("node-math");
+    expect(res.doc.nodes["node-math"].parentId).toBeNull();
+    expect(res.doc.nodes["node-math"].position).toEqual({ x: 640, y: 320 });
+    expect(res.doc.nodes["node-math-chatgpt"].parentId).toBe("node-math");
+
+    // Selecting only root nodes is a no-op
+    const rootOnly = detachNodesToRoots(doc, [doc.rootIds[0]]);
+    expect(rootOnly.detachedIds).toEqual([]);
+    expect(rootOnly.doc).toBe(doc);
+  });
+
+  it("triggers drag-to-detach hint when a child node is dragged far away from its parent into empty space", () => {
+    const doc = createInitialMap();
+    const layouts = computeMindMapLayout(doc);
+    const mathLayout = layouts["node-math"];
+    const rootLayout = layouts[doc.rootIds[0]];
+
+    // Small drag away from parent does NOT detach
+    const smallDrag = computeDragDropHint(
+      "node-math",
+      mathLayout.x + mathLayout.width / 2 + 60,
+      mathLayout.y + mathLayout.height / 2,
+      doc,
+      layouts,
+      { dx: 60, dy: 0 }
+    );
+    expect(smallDrag?.placement).not.toBe("detach");
+
+    // Dragging far away to the right into empty space triggers detach at the dropped coordinates
+    const farDx = 420;
+    const farDy = -180;
+    const detachHint = computeDragDropHint(
+      "node-math",
+      mathLayout.x + mathLayout.width / 2 + farDx,
+      mathLayout.y + mathLayout.height / 2 + farDy,
+      doc,
+      layouts,
+      { dx: farDx, dy: farDy }
+    );
+    expect(detachHint).not.toBeNull();
+    expect(detachHint?.placement).toBe("detach");
+    expect(detachHint?.indicator.kind).toBe("detach");
+    expect(detachHint?.indicator.label).toBe("Release to detach");
+    expect(detachHint?.detachPosition).toEqual({
+      x: Math.round(mathLayout.x + mathLayout.width / 2 + farDx),
+      y: Math.round(mathLayout.y + mathLayout.height / 2 + farDy),
+    });
+
+    // Dragging directly onto another node still reparents/reorders instead of detaching
+    const shortcutsLayout = layouts["node-shortcuts"];
+    const reparentHint = computeDragDropHint(
+      "node-math",
+      shortcutsLayout.x + shortcutsLayout.width / 2,
+      shortcutsLayout.y + shortcutsLayout.height / 2,
+      doc,
+      layouts,
+      {
+        dx: shortcutsLayout.x - mathLayout.x,
+        dy: shortcutsLayout.y - mathLayout.y,
+      }
+    );
+    expect(reparentHint?.placement).toBe("inside");
+    expect(reparentHint?.targetId).toBe("node-shortcuts");
+
+    // Dragging a right-side branch just across the root center still flips to left side instead of detaching
+    const flipX = rootLayout.x - 40;
+    const flipY = rootLayout.y - 160;
+    const flipHint = computeDragDropHint("node-math", flipX, flipY, doc, layouts, {
+      dx: flipX - (mathLayout.x + mathLayout.width / 2),
+      dy: flipY - (mathLayout.y + mathLayout.height / 2),
+    });
+    expect(flipHint?.placement).toBe("inside");
+    expect(flipHint?.side).toBe("left");
+  });
+
+  it("allows dragging a detached root node back onto an existing mind map to attach as child or sibling", () => {
+    let doc = createInitialMap();
+    // Detach "node-math" (which has children "node-math-chatgpt" & "node-math-claude")
+    doc = detachNodeToRoot(doc, "node-math", { x: 600, y: 500 });
+    expect(doc.rootIds).toContain("node-math");
+    expect(doc.nodes["node-math"].parentId).toBeNull();
+
+    const layouts = computeMindMapLayout(doc);
+    const shortcutsLayout = layouts["node-shortcuts"];
+    const mainRootLayout = layouts[doc.rootIds[0]];
+
+    // Hovering empty canvas space returns null (stays floating root)
+    const emptyHint = computeDragDropHint("node-math", 1200, 900, doc, layouts);
+    expect(emptyHint).toBeNull();
+
+    // Hovering over the middle of "node-shortcuts" offers "Make child"
+    const childHint = computeDragDropHint(
+      "node-math",
+      shortcutsLayout.x + shortcutsLayout.width / 2,
+      shortcutsLayout.y + shortcutsLayout.height / 2,
+      doc,
+      layouts
+    );
+    expect(childHint?.placement).toBe("inside");
+    expect(childHint?.targetId).toBe("node-shortcuts");
+    expect(childHint?.indicator.label).toBe("Make child");
+
+    // Dropping attaches "node-math" (and its subtree) under "node-shortcuts" and removes it from rootIds
+    const attachedAsChild = repositionNode(
+      doc,
+      "node-math",
+      "node-shortcuts",
+      "inside",
+      childHint?.side
+    );
+    expect(attachedAsChild.rootIds).not.toContain("node-math");
+    expect(attachedAsChild.nodes["node-math"].parentId).toBe("node-shortcuts");
+    expect(attachedAsChild.nodes["node-math"].position).toBeUndefined();
+    expect(attachedAsChild.nodes["node-shortcuts"].childrenIds).toContain("node-math");
+    expect(attachedAsChild.nodes["node-math-chatgpt"].parentId).toBe("node-math");
+
+    // Hovering top edge of "node-shortcuts" offers "Insert above" as sibling
+    const siblingHint = computeDragDropHint(
+      "node-math",
+      shortcutsLayout.x + shortcutsLayout.width / 2,
+      shortcutsLayout.y + 4,
+      doc,
+      layouts
+    );
+    expect(siblingHint?.placement).toBe("before");
+    expect(siblingHint?.indicator.label).toBe("Insert above");
+
+    const attachedAsSibling = repositionNode(
+      doc,
+      "node-math",
+      "node-shortcuts",
+      "before",
+      siblingHint?.side
+    );
+    expect(attachedAsSibling.rootIds).not.toContain("node-math");
+    expect(attachedAsSibling.nodes["node-math"].parentId).toBe(doc.rootIds[0]);
+
+    // Hovering over left half of main root offers "Attach to Left"
+    const rootAttachHint = computeDragDropHint(
+      "node-math",
+      mainRootLayout.x + 12,
+      mainRootLayout.y + mainRootLayout.height / 2,
+      doc,
+      layouts
+    );
+    expect(rootAttachHint?.placement).toBe("inside");
+    expect(rootAttachHint?.side).toBe("left");
+    expect(rootAttachHint?.indicator.label).toBe("Attach to Left");
   });
 });
