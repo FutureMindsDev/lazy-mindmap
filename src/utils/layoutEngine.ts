@@ -979,3 +979,39 @@ export function findArrowNavigationTarget(
 
   return bestId;
 }
+
+export function computeFitViewport(
+  layouts: Record<string, LayoutNodeInfo>,
+  containerWidth: number,
+  containerHeight: number
+): { x: number; y: number; scale: number } | null {
+  const items = Object.values(layouts);
+  if (items.length === 0 || containerWidth <= 0 || containerHeight <= 0) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const item of items) {
+    minX = Math.min(minX, item.x);
+    minY = Math.min(minY, item.y);
+    maxX = Math.max(maxX, item.x + item.width);
+    maxY = Math.max(maxY, item.y + item.height);
+  }
+
+  const boxW = Math.max(200, maxX - minX);
+  const boxH = Math.max(150, maxY - minY);
+  const pad = 72;
+  const scale = Math.min(
+    1.35,
+    Math.max(0.25, Math.min((containerWidth - pad) / boxW, (containerHeight - pad) / boxH))
+  );
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  return {
+    x: containerWidth / 2 - cx * scale,
+    y: containerHeight / 2 - cy * scale,
+    scale,
+  };
+}
