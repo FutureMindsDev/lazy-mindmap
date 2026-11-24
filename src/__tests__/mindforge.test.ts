@@ -17,6 +17,7 @@ import { parseMarkdownToSubtree } from "../utils/markdownToSubtree";
 import {
   buildCrossLinkPath,
   clampCrossLinkLabel,
+  computeFitViewport,
   computeMindMapLayout,
   countSentences,
   getNodeEdgeMidpoint,
@@ -886,5 +887,28 @@ describe("Multi-Root Non-Overlapping Layout & Node No-Fill State", () => {
     const layouts = computeMindMapLayout(onlyNoFill);
     expect(layouts[targetId].branchColor).not.toBe("none");
     expect(layouts[targetId].branchColor.startsWith("#")).toBe(true);
+  });
+
+  it("computes zoom-to-fit viewport transform centered on all nodes", () => {
+    const doc = createInitialMap();
+    const layouts = computeMindMapLayout(doc);
+    const fit = computeFitViewport(layouts, 1200, 800);
+    expect(fit).not.toBeNull();
+    expect(fit!.scale).toBeGreaterThanOrEqual(0.25);
+    expect(fit!.scale).toBeLessThanOrEqual(1.35);
+
+    // Every node bounding box fits inside the 1200x800 container
+    for (const node of Object.values(layouts)) {
+      const left = fit!.x + node.x * fit!.scale;
+      const top = fit!.y + node.y * fit!.scale;
+      const right = left + node.width * fit!.scale;
+      const bottom = top + node.height * fit!.scale;
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(top).toBeGreaterThanOrEqual(0);
+      expect(right).toBeLessThanOrEqual(1200);
+      expect(bottom).toBeLessThanOrEqual(800);
+    }
+
+    expect(computeFitViewport({}, 1200, 800)).toBeNull();
   });
 });

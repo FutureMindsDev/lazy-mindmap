@@ -42,6 +42,7 @@ import {
   buildConnectorPath,
   buildCrossLinkPath,
   clampCrossLinkLabel,
+  computeFitViewport,
   computeMindMapLayout,
   DEFAULT_HORIZONTAL_GAP,
   getNodeEdgeMidpoint,
@@ -399,6 +400,8 @@ export function App() {
   const saveTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const initializedRef = useRef(false);
+  const initialFitPendingRef = useRef(true);
+  const initialFitTimerRef = useRef<number | null>(null);
   const docRef = useRef<MindMapDocument>(doc);
   docRef.current = doc;
   const dirtyRef = useRef(false);
@@ -561,20 +564,24 @@ export function App() {
       }
 
       initializedRef.current = true;
+      initialFitPendingRef.current = true;
+      if (initialFitTimerRef.current) window.clearTimeout(initialFitTimerRef.current);
+      initialFitTimerRef.current = window.setTimeout(() => {
+        initialFitPendingRef.current = false;
+      }, 350);
 
       requestAnimationFrame(() => {
         const el = viewportRef.current;
-        if (el) {
-          setViewport({
-            x: el.clientWidth / 2,
-            y: el.clientHeight / 2,
-            scale: 1,
-          });
+        if (!el) return;
+        const fit = computeFitViewport(layoutsRef.current, el.clientWidth, el.clientHeight);
+        if (fit) {
+          setViewport(fit);
         }
       });
     })();
     return () => {
       active = false;
+      if (initialFitTimerRef.current) window.clearTimeout(initialFitTimerRef.current);
     };
   }, [refreshMapList]);
 
@@ -627,6 +634,7 @@ export function App() {
   }, []);
 
   const recenterView = useCallback(() => {
+    initialFitPendingRef.current = false;
     const el = viewportRef.current;
     if (!el) return;
     const rootLayout = layouts[doc.rootIds[0]];
@@ -640,36 +648,23 @@ export function App() {
   }, [layouts, doc.rootIds]);
 
   const zoomToFit = useCallback(() => {
+    initialFitPendingRef.current = false;
     const el = viewportRef.current;
-    const items = Object.values(layouts);
-    if (!el || items.length === 0) return;
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const item of items) {
-      minX = Math.min(minX, item.x);
-      minY = Math.min(minY, item.y);
-      maxX = Math.max(maxX, item.x + item.width);
-      maxY = Math.max(maxY, item.y + item.height);
+    if (!el) return;
+    const fit = computeFitViewport(layouts, el.clientWidth, el.clientHeight);
+    if (fit) {
+      setViewport(fit);
     }
+  }, [layouts]);
 
-    const boxW = Math.max(200, maxX - minX);
-    const boxH = Math.max(150, maxY - minY);
-    const pad = 72;
-    const scale = Math.min(
-      1.35,
-      Math.max(0.25, Math.min((el.clientWidth - pad) / boxW, (el.clientHeight - pad) / boxH))
-    );
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-
-    setViewport({
-      x: el.clientWidth / 2 - cx * scale,
-      y: el.clientHeight / 2 - cy * scale,
-      scale,
-    });
+  useEffect(() => {
+    if (!initializedRef.current || !initialFitPendingRef.current) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    const fit = computeFitViewport(layouts, el.clientWidth, el.clientHeight);
+    if (fit) {
+      setViewport(fit);
+    }
   }, [layouts]);
 
   const centerOnNode = useCallback(
@@ -744,6 +739,7 @@ export function App() {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      initialFitPendingRef.current = false;
       const rawX = e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX;
       const rawY = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
       if (e.ctrlKey || e.metaKey) {
@@ -1244,6 +1240,7 @@ export function App() {
 
   // Canvas pointer pan / marquee select
   const handleCanvasMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    initialFitPendingRef.current = false;
     setStylePopoverOpen(false);
     setStickerPopoverOpen(false);
 
