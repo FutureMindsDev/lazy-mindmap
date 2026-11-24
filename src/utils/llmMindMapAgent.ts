@@ -12,10 +12,10 @@ import { parseMarkdownToSubtree, type SubtreeBranch } from "./markdownToSubtree"
 import { fileToDataUrl, uploadFileDual } from "./storage";
 import { cloneDocument, insertSubtreeBranches, makeId } from "./treeOps";
 
-export const LLM_CONFIG_STORAGE_KEY = "mindforge:llmConfig";
-export const LLM_HISTORY_STORAGE_KEY = "mindforge:llmChatHistory";
-export const LLM_CONVERSATIONS_STORAGE_KEY = "mindforge:llmConversations";
-export const LLM_ACTIVE_CONV_STORAGE_KEY = "mindforge:llmActiveConversationId";
+export const LLM_CONFIG_STORAGE_KEY = "lazymindmap:llmConfig";
+export const LLM_HISTORY_STORAGE_KEY = "lazymindmap:llmChatHistory";
+export const LLM_CONVERSATIONS_STORAGE_KEY = "lazymindmap:llmConversations";
+export const LLM_ACTIVE_CONV_STORAGE_KEY = "lazymindmap:llmActiveConversationId";
 
 export const LLM_PROVIDER_META: Record<
   LlmProviderId,
@@ -455,7 +455,7 @@ export function buildMindMapSystemPrompt(
           .join("\n")
       : "None";
 
-  return `You are MindForge AI, an assistant that directly reads, creates, and modifies nodes in the user's mind map.
+  return `You are LazyMindmap AI, an assistant that directly reads, creates, and modifies nodes in the user's mind map.
 
 Current Map Title: ${doc.title}
 Primary Root ID: ${doc.rootIds[0] || ""}

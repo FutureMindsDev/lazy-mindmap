@@ -1,9 +1,9 @@
 services:
-  mindforge:
+  lazymindmap:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mindforge-web
+    container_name: lazymindmap-web
     ports:
       - "3000:3000"
     environment:

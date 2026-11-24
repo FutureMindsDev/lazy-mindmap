@@ -1,12 +1,12 @@
-# AGENTS.md — MindForge Workspace Guide
+# AGENTS.md — LazyMindmap Workspace Guide
 
-This file provides essential project context, user UX/UI preferences, architecture details, coding rules, and the required Git workflow for every new session working on **MindForge**.
+This file provides essential project context, user UX/UI preferences, architecture details, coding rules, and the required Git workflow for every new session working on **LazyMindmap**.
 
 ---
 
 ## 1. Project Overview & Tech Stack
 
-**MindForge** is a keyboard-first, rich-content mind mapping web application combining MindMup shortcut ergonomics, MindMeister-inspired visual polish/layouts, and rich Markdown/KaTeX/code/Mermaid rendering inside every node.
+**LazyMindmap** is a keyboard-first, rich-content mind mapping web application combining MindMup shortcut ergonomics, MindMeister-inspired visual polish/layouts, and rich Markdown/KaTeX/code/Mermaid rendering inside every node.
 
 - **Frontend:** React 19 + TypeScript + Vite (`src/`)
 - **Rich Node Rendering:** `marked` + `DOMPurify` + `katex` (with `mhchem`) + `highlight.js` + custom SVG Mermaid flowchart renderer (`src/utils/llmMathNormalizer.ts`)
@@ -20,7 +20,7 @@ This file provides essential project context, user UX/UI preferences, architectu
 
 ### 2.1 Minimalist Top Navbar & Top-Right Hamburger Menu
 - **Keep the top navbar uncluttered.** Only retain:
-  - Brand (`MindForge`)
+  - Brand (`LazyMindmap`)
   - **+ Floating** detached root node button (`Ctrl+D`)
   - **Undo / Redo** (`U`/`R` or `Ctrl+Z`/`Ctrl+Y`) and **Select (`V`) / Hand (`H`)** tools
   - **Search** (`Ctrl+F`) — while the **LLM Assistant** circular trigger button lives at the **bottom-right** corner, sliding out a right-hand AI chatbox with chat history, API key settings, universal file uploads, and modified/created node tracking (`Ctrl+Shift+V`)
@@ -98,7 +98,7 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
 | `src/utils/themes.ts` | Theme palettes, color swatches, font presets, contrast foreground helper |
 | `src/utils/exporters.ts` | Export/import for JSON, Markdown, MindMup `.mup`, FreeMind `.mm`, SVG, PNG |
 | `server/api.mjs` | Backend REST middleware for `/api/maps`, `/api/uploads`, `/api/llm/chat`, `/api/health` |
-| `src/__tests__/mindforge.test.ts` | Vitest unit test suite |
+| `src/__tests__/lazymindmap.test.ts` | Vitest unit test suite |
 
 ---
 
@@ -107,7 +107,7 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
 Always run both commands after making code changes and confirm both pass before committing:
 
 ```sh
-npm test        # Runs Vitest suite (src/__tests__/mindforge.test.ts)
+npm test        # Runs Vitest suite (src/__tests__/lazymindmap.test.ts)
 npm run build   # Runs TypeScript type-check (tsc) and production Vite build
 ```
 

@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: "mindforge-api-middleware",
+      name: "lazymindmap-api-middleware",
       configureServer(server) {
         server.middlewares.use(createApiMiddleware());
       },

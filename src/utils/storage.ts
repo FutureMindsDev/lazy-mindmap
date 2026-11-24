@@ -1,9 +1,9 @@
 import type { MapSummary, MindMapDocument } from "../types/mindmap";
 
-const DB_NAME = "mindforge_db";
+const DB_NAME = "lazymindmap_db";
 const DB_VERSION = 1;
 const STORE_NAME = "maps";
-const LAST_MAP_KEY = "mindforge:lastMapId";
+const LAST_MAP_KEY = "lazymindmap:lastMapId";
 
 function openIdb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -39,7 +39,7 @@ export async function idbSaveMap(doc: MindMapDocument): Promise<{ localSaved: bo
   } catch (idbErr) {
     // Fallback to localStorage if IndexedDB fails in private browsing
     try {
-      localStorage.setItem(`mindforge:map:${doc.id}`, JSON.stringify(doc));
+      localStorage.setItem(`lazymindmap:map:${doc.id}`, JSON.stringify(doc));
       localStorage.setItem(LAST_MAP_KEY, doc.id);
       return { localSaved: true };
     } catch (lsErr) {
@@ -65,7 +65,7 @@ export async function idbGetMap(id: string): Promise<MindMapDocument | null> {
     });
   } catch {
     try {
-      const raw = localStorage.getItem(`mindforge:map:${id}`);
+      const raw = localStorage.getItem(`lazymindmap:map:${id}`);
       return raw ? (JSON.parse(raw) as MindMapDocument) : null;
     } catch {
       return null;

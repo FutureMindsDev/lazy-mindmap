@@ -18,7 +18,7 @@ function triggerDownload(filename: string, content: string | Blob, mime: string)
 }
 
 function safeSlug(title: string): string {
-  return (title || "mindforge-map").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mindforge-map";
+  return (title || "lazymindmap-map").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "lazymindmap-map";
 }
 
 export function exportMapAsJson(doc: MindMapDocument) {
@@ -295,7 +295,7 @@ export function importMapFromFileContent(filename: string, rawText: string): Min
     return insertSubtreeBranches(base, rootId, branches).doc;
   }
 
-  // Native MindForge JSON
+  // Native LazyMindmap JSON
   const doc = JSON.parse(rawText) as MindMapDocument;
   if (!doc.nodes || !doc.rootIds) {
     throw new Error("Unsupported mind map JSON format");
