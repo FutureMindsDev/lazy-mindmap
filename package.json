@@ -1,6 +1,7 @@
 {
   "name": "lazymindmap",
   "version": "1.0.0",
+  "description": "Keyboard-first, rich-content mind mapping web application with Markdown, KaTeX, code highlighting, Mermaid diagrams, and an integrated AI assistant.",
   "private": true,
   "type": "module",
   "scripts": {
