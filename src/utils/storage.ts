@@ -1,9 +1,57 @@
 import type { MapSummary, MindMapDocument } from "../types/mindmap";
+import { getDeviceFingerprint } from "./deviceFingerprint";
 
-const DB_NAME = "lazymindmap_db";
+const BASE_DB_NAME = "lazymindmap_db";
 const DB_VERSION = 1;
 const STORE_NAME = "maps";
-const LAST_MAP_KEY = "lazymindmap:lastMapId";
+const BASE_LAST_MAP_KEY = "lazymindmap:lastMapId";
+
+let activeUserScope: string | null = null;
+let authTokenProvider: (() => Promise<string | null>) | null = null;
+
+export function setStorageUserScope(uid: string | null): void {
+  activeUserScope = uid && uid.trim() ? uid.trim() : null;
+}
+
+export function setStorageAuthTokenProvider(fn: (() => Promise<string | null>) | null): void {
+  authTokenProvider = fn;
+}
+
+function getDbName(): string {
+  return activeUserScope ? `${BASE_DB_NAME}_${activeUserScope}` : BASE_DB_NAME;
+}
+
+function getLastMapKey(): string {
+  return activeUserScope ? `${BASE_LAST_MAP_KEY}:${activeUserScope}` : BASE_LAST_MAP_KEY;
+}
+
+function getLsMapKey(id: string): string {
+  return activeUserScope ? `lazymindmap:map:${activeUserScope}:${id}` : `lazymindmap:map:${id}`;
+}
+
+async function buildApiHeaders(includeJson = false): Promise<{
+  headers: Record<string, string>;
+  hasAuth: boolean;
+}> {
+  const headers: Record<string, string> = {};
+  if (includeJson) headers["Content-Type"] = "application/json";
+  let token: string | null = null;
+  if (authTokenProvider) {
+    try {
+      token = await authTokenProvider();
+    } catch {
+      token = null;
+    }
+  }
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  try {
+    const fp = await getDeviceFingerprint();
+    if (fp) headers["X-Device-Fingerprint"] = fp;
+  } catch {}
+  return { headers, hasAuth: Boolean(token) };
+}
 
 function openIdb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -11,7 +59,7 @@ function openIdb(): Promise<IDBDatabase> {
       reject(new Error("IndexedDB unavailable"));
       return;
     }
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(getDbName(), DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -33,14 +81,14 @@ export async function idbSaveMap(doc: MindMapDocument): Promise<{ localSaved: bo
       tx.onerror = () => reject(tx.error);
     });
     try {
-      localStorage.setItem(LAST_MAP_KEY, doc.id);
+      localStorage.setItem(getLastMapKey(), doc.id);
     } catch {}
     return { localSaved: true };
   } catch (idbErr) {
     // Fallback to localStorage if IndexedDB fails in private browsing
     try {
-      localStorage.setItem(`lazymindmap:map:${doc.id}`, JSON.stringify(doc));
-      localStorage.setItem(LAST_MAP_KEY, doc.id);
+      localStorage.setItem(getLsMapKey(doc.id), JSON.stringify(doc));
+      localStorage.setItem(getLastMapKey(), doc.id);
       return { localSaved: true };
     } catch (lsErr) {
       const msg =
@@ -65,7 +113,7 @@ export async function idbGetMap(id: string): Promise<MindMapDocument | null> {
     });
   } catch {
     try {
-      const raw = localStorage.getItem(`lazymindmap:map:${id}`);
+      const raw = localStorage.getItem(getLsMapKey(id));
       return raw ? (JSON.parse(raw) as MindMapDocument) : null;
     } catch {
       return null;
@@ -105,11 +153,14 @@ export async function idbDeleteMap(id: string): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
   } catch {}
+  try {
+    localStorage.removeItem(getLsMapKey(id));
+  } catch {}
 }
 
 export function getLastOpenedMapId(): string | null {
   try {
-    return localStorage.getItem(LAST_MAP_KEY);
+    return localStorage.getItem(getLastMapKey());
   } catch {
     return null;
   }
@@ -125,11 +176,23 @@ export interface DualSaveResult {
 export async function saveMapDual(doc: MindMapDocument): Promise<DualSaveResult> {
   const localRes = await idbSaveMap(doc);
   try {
+    const { headers, hasAuth } = await buildApiHeaders(true);
     const res = await fetch(`/api/maps/${encodeURIComponent(doc.id)}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(doc),
     });
+
+    // Guests in Firebase cloud mode save 100% locally in browser for free without error banners
+    if (!hasAuth && res.status === 401) {
+      return {
+        ok: localRes.localSaved,
+        backendSynced: false,
+        localSaved: localRes.localSaved,
+        error: localRes.localSaved ? undefined : localRes.error,
+      };
+    }
+
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {
@@ -170,7 +233,11 @@ export async function saveMapDual(doc: MindMapDocument): Promise<DualSaveResult>
 export async function listMapsDual(): Promise<{ summaries: MapSummary[]; backendOnline: boolean }> {
   const local = await idbListMaps();
   try {
-    const res = await fetch("/api/maps");
+    const { headers, hasAuth } = await buildApiHeaders(false);
+    const res = await fetch("/api/maps", { headers });
+    if (!hasAuth && res.status === 401) {
+      return { summaries: local, backendOnline: false };
+    }
     if (!res.ok) throw new Error("API error");
     const remote = (await res.json()) as MapSummary[];
 
@@ -198,7 +265,8 @@ export async function listMapsDual(): Promise<{ summaries: MapSummary[]; backend
 export async function loadMapDual(id: string): Promise<MindMapDocument | null> {
   const local = await idbGetMap(id);
   try {
-    const res = await fetch(`/api/maps/${encodeURIComponent(id)}`);
+    const { headers } = await buildApiHeaders(false);
+    const res = await fetch(`/api/maps/${encodeURIComponent(id)}`, { headers });
     if (!res.ok) return local;
     const remote = (await res.json()) as MindMapDocument;
     if (!local || new Date(remote.updatedAt).getTime() >= new Date(local.updatedAt).getTime()) {
@@ -214,7 +282,8 @@ export async function loadMapDual(id: string): Promise<MindMapDocument | null> {
 export async function deleteMapDual(id: string): Promise<void> {
   await idbDeleteMap(id);
   try {
-    await fetch(`/api/maps/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const { headers } = await buildApiHeaders(false);
+    await fetch(`/api/maps/${encodeURIComponent(id)}`, { method: "DELETE", headers });
   } catch {}
 }
 

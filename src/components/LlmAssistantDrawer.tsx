@@ -14,22 +14,28 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Crown,
   Eye,
   EyeOff,
   FileText,
   History,
   KeyRound,
   Loader2,
+  Lock,
   MessageSquare,
   MessageSquarePlus,
   Paperclip,
   RotateCcw,
   Send,
+  ShieldCheck,
   Sparkles,
   Trash2,
+  UserCheck,
   X,
 } from "lucide-react";
 import type {
+  AiAccessMode,
+  ByokStorageMode,
   LlmChatFile,
   LlmChatMessage,
   LlmConfig,
@@ -37,7 +43,9 @@ import type {
   LlmNodeChangeRecord,
   LlmProviderId,
   MindMapDocument,
+  UserAccountState,
 } from "../types/mindmap";
+import { deleteByokVaultKey, saveByokVaultKey } from "../utils/accountApi";
 import { renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   buildMindMapSystemPrompt,
@@ -64,11 +72,15 @@ interface LlmAssistantDrawerProps {
   doc: MindMapDocument;
   selectedIds: string[];
   primarySelectedId: string;
+  account: UserAccountState;
   onToggleOpen: () => void;
   onClose: () => void;
   onApplyDocChange: (nextDoc: MindMapDocument, focusNodeId: string | null) => void;
   onFocusNode: (nodeId: string) => void;
   onOpenClassicMarkdownPaste: () => void;
+  onOpenAuth: () => void;
+  onOpenSubscription: () => void;
+  onRefreshAccount: () => Promise<unknown>;
   onAnnounce: (msg: string) => void;
 }
 
@@ -118,16 +130,22 @@ export function LlmAssistantDrawer({
   doc,
   selectedIds,
   primarySelectedId,
+  account,
   onToggleOpen,
   onClose,
   onApplyDocChange,
   onFocusNode,
   onOpenClassicMarkdownPaste,
+  onOpenAuth,
+  onOpenSubscription,
+  onRefreshAccount,
   onAnnounce,
 }: LlmAssistantDrawerProps) {
   const [config, setConfig] = useState<LlmConfig>(() => loadLlmConfig());
   const [draftConfig, setDraftConfig] = useState<LlmConfig>(() => loadLlmConfig());
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(() => !loadLlmConfig().apiKey.trim());
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [savingSettings, setSavingSettings] = useState<boolean>(false);
+  const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [historyViewOpen, setHistoryViewOpen] = useState(false);
 
@@ -143,6 +161,7 @@ export function LlmAssistantDrawer({
   const [sending, setSending] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [expandedRawErrors, setExpandedRawErrors] = useState<Record<string, boolean>>({});
+  const [errorCodes, setErrorCodes] = useState<Record<string, string>>({});
 
   const drawerId = useId();
   const inputId = useId();
@@ -168,7 +187,76 @@ export function LlmAssistantDrawer({
   );
   const messages = activeConversation?.messages || [];
 
-  const hasApiKey = Boolean(config.apiKey.trim());
+  const isUsingByok = config.mode === "byok_vault" || config.mode === "byok_session";
+  const isDraftByok = draftConfig.mode === "byok_vault" || draftConfig.mode === "byok_session";
+  const isProActive = Boolean(account.authenticated && account.subscription?.status === "active");
+
+  const effectiveRunMode: AiAccessMode = useMemo(() => {
+    if (isUsingByok) {
+      return config.byokStorage === "session" ? "byok_session" : "byok_vault";
+    }
+    return isProActive ? "managed" : "trial";
+  }, [isUsingByok, config.byokStorage, isProActive]);
+
+  const isAiReady = useMemo(() => {
+    if (effectiveRunMode === "byok_session") return Boolean(config.apiKey.trim());
+    if (effectiveRunMode === "byok_vault") {
+      return Boolean(account.authenticated && account.byok?.configured);
+    }
+    if (effectiveRunMode === "managed") {
+      return Boolean(
+        account.authenticated &&
+          account.subscription?.status === "active" &&
+          (account.quota?.monthlyRemaining ?? 0) > 0 &&
+          (account.quota?.dailyRemaining ?? 0) > 0
+      );
+    }
+    return Boolean(
+      account.authenticated &&
+        (account.user?.emailVerified || !account.firebaseConfigured) &&
+        (account.trial?.remaining ?? 0) > 0
+    );
+  }, [effectiveRunMode, config.apiKey, account]);
+
+  const headerModeLabel = useMemo(() => {
+    if (effectiveRunMode === "byok_session") {
+      return `BYOK RAM · ${LLM_PROVIDER_META[config.provider].label}`;
+    }
+    if (effectiveRunMode === "byok_vault") {
+      const p = account.byok?.provider || config.provider;
+      return `BYOK Vault · ${LLM_PROVIDER_META[p].label}`;
+    }
+    if (effectiveRunMode === "managed") {
+      return `Pro · ${account.billing.managedModel}`;
+    }
+    if (!account.authenticated) {
+      return `Trial (${account.billing.maxTrialCount} Free)`;
+    }
+    return `Trial (${account.trial?.remaining ?? 0}/${account.billing.maxTrialCount})`;
+  }, [effectiveRunMode, config.provider, account]);
+
+  // Wipe in-memory session key if user signs out so keys never leak across sessions
+  const prevUidRef = useRef<string | null>(account.user?.uid || null);
+  useEffect(() => {
+    const nextUid = account.user?.uid || null;
+    if (prevUidRef.current && prevUidRef.current !== nextUid) {
+      setConfig((prev) => ({ ...prev, apiKey: "" }));
+      setDraftConfig((prev) => ({ ...prev, apiKey: "" }));
+    }
+    prevUidRef.current = nextUid;
+  }, [account.user?.uid]);
+
+  // Sync non-secret provider/model display from vaulted BYOK when configured
+  useEffect(() => {
+    if (account.byok?.configured && account.byok.provider) {
+      setDraftConfig((prev) => ({
+        ...prev,
+        provider: account.byok?.provider || prev.provider,
+        model: account.byok?.model || prev.model,
+        baseUrl: account.byok?.baseUrl ?? prev.baseUrl,
+      }));
+    }
+  }, [account.byok]);
 
   useEffect(() => {
     saveLlmConversations(conversations);
@@ -182,18 +270,13 @@ export function LlmAssistantDrawer({
 
   useEffect(() => {
     if (open) {
-      if (!config.apiKey.trim()) {
-        setSettingsOpen(true);
-      }
       requestAnimationFrame(() => {
-        if (!config.apiKey.trim()) {
-          apiKeyInputRef.current?.focus();
-        } else if (!historyViewOpen) {
+        if (!historyViewOpen) {
           textareaRef.current?.focus();
         }
       });
     }
-  }, [open, config.apiKey, historyViewOpen]);
+  }, [open, historyViewOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -238,25 +321,110 @@ export function LlmAssistantDrawer({
     }
   };
 
-  const handleSaveConfig = (e?: FormEvent) => {
-    e?.preventDefault();
-    const cleaned: LlmConfig = {
-      provider: draftConfig.provider,
-      apiKey: draftConfig.apiKey.trim(),
-      model:
-        draftConfig.model.trim() || LLM_PROVIDER_META[draftConfig.provider].defaultModel,
-      baseUrl: draftConfig.baseUrl?.trim() || "",
-    };
-    setConfig(cleaned);
-    setDraftConfig(cleaned);
-    saveLlmConfig(cleaned);
-    if (cleaned.apiKey) {
-      setSettingsOpen(false);
-      onAnnounce(`${LLM_PROVIDER_META[cleaned.provider].label} API key saved`);
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    } else {
-      onAnnounce("Please enter an API key");
+  const handleSwitchMode = (nextMode: "managed" | "byok") => {
+    setSettingsFeedback(null);
+    const resolvedMode: AiAccessMode =
+      nextMode === "byok"
+        ? draftConfig.byokStorage === "session"
+          ? "byok_session"
+          : "byok_vault"
+        : isProActive
+        ? "managed"
+        : "trial";
+    const nextCfg: LlmConfig = { ...config, mode: resolvedMode };
+    setConfig(nextCfg);
+    setDraftConfig((prev) => ({ ...prev, mode: resolvedMode }));
+    saveLlmConfig(nextCfg);
+    onAnnounce(
+      nextMode === "byok" ? "Switched AI Assistant to BYOK (Free)" : "Switched AI Assistant to Managed AI"
+    );
+  };
+
+  const handleDeleteVaultKey = async () => {
+    setSavingSettings(true);
+    setSettingsFeedback(null);
+    try {
+      await deleteByokVaultKey();
+      await onRefreshAccount();
+      setSettingsFeedback("Deleted BYOK API key from Encrypted Cloud Vault.");
+      onAnnounce("Deleted vaulted BYOK key");
+    } catch (err) {
+      setSettingsFeedback(err instanceof Error ? err.message : "Failed to delete vaulted key.");
+    } finally {
+      setSavingSettings(false);
     }
+  };
+
+  const handleSaveConfig = async (e?: FormEvent) => {
+    e?.preventDefault();
+    setSettingsFeedback(null);
+    const storageMode: ByokStorageMode = draftConfig.byokStorage === "session" ? "session" : "vault";
+    const resolvedMode: AiAccessMode = storageMode === "session" ? "byok_session" : "byok_vault";
+    const model =
+      draftConfig.model.trim() || LLM_PROVIDER_META[draftConfig.provider].defaultModel;
+    const baseUrl = draftConfig.baseUrl?.trim() || "";
+    const trimmedKey = draftConfig.apiKey.trim();
+
+    if (storageMode === "vault") {
+      if (!account.authenticated) {
+        setSettingsFeedback("Sign in to store your key in the AES-256-GCM Encrypted Cloud Vault, or pick Session-Only (RAM).");
+        onOpenAuth();
+        return;
+      }
+      if (!trimmedKey && !account.byok?.configured) {
+        setSettingsFeedback("Please enter an API key to encrypt and store in your Cloud Vault.");
+        return;
+      }
+      setSavingSettings(true);
+      try {
+        await saveByokVaultKey({
+          provider: draftConfig.provider,
+          model,
+          baseUrl,
+          apiKey: trimmedKey || undefined,
+        });
+        await onRefreshAccount();
+        const cleaned: LlmConfig = {
+          provider: draftConfig.provider,
+          apiKey: "", // Never retained in client memory once vaulted
+          model,
+          baseUrl,
+          mode: "byok_vault",
+          byokStorage: "vault",
+        };
+        setConfig(cleaned);
+        setDraftConfig(cleaned);
+        saveLlmConfig(cleaned);
+        setSettingsOpen(false);
+        onAnnounce("BYOK key encrypted and saved in Cloud Vault");
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      } catch (err) {
+        setSettingsFeedback(err instanceof Error ? err.message : "Failed to save vaulted key.");
+      } finally {
+        setSavingSettings(false);
+      }
+      return;
+    }
+
+    // Session-Only (RAM): kept strictly in React state, never written to localStorage
+    if (!trimmedKey) {
+      setSettingsFeedback("Please enter an API key for this session.");
+      return;
+    }
+    const sessionCfg: LlmConfig = {
+      provider: draftConfig.provider,
+      apiKey: trimmedKey,
+      model,
+      baseUrl,
+      mode: resolvedMode,
+      byokStorage: "session",
+    };
+    setConfig(sessionCfg);
+    setDraftConfig(sessionCfg);
+    saveLlmConfig(sessionCfg); // Automatically strips apiKey before localStorage persistence
+    setSettingsOpen(false);
+    onAnnounce(`${LLM_PROVIDER_META[sessionCfg.provider].label} session key ready (RAM only)`);
+    requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
   const updateConversationMessages = (
@@ -330,6 +498,7 @@ export function LlmAssistantDrawer({
       const systemPrompt = buildMindMapSystemPrompt(curDoc, curSelected, userFiles);
       const rawReply = await callLlmProvider({
         config,
+        mode: effectiveRunMode,
         systemPrompt,
         messages: historyUpToUserMsg,
       });
@@ -353,16 +522,25 @@ export function LlmAssistantDrawer({
         affectedNodes: applied.affectedNodes,
       };
       updateConversationMessages(convId, (prev) => [...prev, assistantMessage]);
+      if (effectiveRunMode === "trial" || effectiveRunMode === "managed") {
+        void onRefreshAccount();
+      }
     } catch (err) {
       const errorMsg =
         err instanceof Error ? err.message : "LLM API request failed with an unknown error.";
       const status = err instanceof LlmApiError && err.status ? ` (HTTP ${err.status})` : "";
       const rawError = err instanceof LlmApiError ? err.rawError : undefined;
+      const errCode = err instanceof LlmApiError ? err.code : undefined;
+      const msgId = makeId("msg");
+
+      if (errCode) {
+        setErrorCodes((prev) => ({ ...prev, [msgId]: errCode }));
+      }
 
       updateConversationMessages(convId, (prev) => [
         ...prev,
         {
-          id: makeId("msg"),
+          id: msgId,
           role: "error",
           content: `API Error${status}: ${errorMsg}`,
           createdAt: new Date().toISOString(),
@@ -372,6 +550,79 @@ export function LlmAssistantDrawer({
     } finally {
       setSending(false);
     }
+  };
+
+  const pushPreflightError = (convId: string, msgText: string, code: string) => {
+    const errId = makeId("msg");
+    setErrorCodes((prev) => ({ ...prev, [errId]: code }));
+    updateConversationMessages(convId, (prev) => [
+      ...prev,
+      {
+        id: errId,
+        role: "error",
+        content: msgText,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  };
+
+  const checkPreflightAccess = (convId: string): boolean => {
+    if (effectiveRunMode === "byok_session" && !config.apiKey.trim()) {
+      setSettingsOpen(true);
+      pushPreflightError(
+        convId,
+        "Your Session BYOK key is empty (RAM-only keys reset on reload). Add your API key above or switch to Managed AI.",
+        "BYOK_MISSING"
+      );
+      requestAnimationFrame(() => apiKeyInputRef.current?.focus());
+      return false;
+    }
+    if (effectiveRunMode === "byok_vault") {
+      if (!account.authenticated) {
+        pushPreflightError(
+          convId,
+          "Sign in to use your Encrypted Cloud Vault BYOK key, or switch to Session-Only (RAM).",
+          "AUTH_REQUIRED"
+        );
+        return false;
+      }
+      if (!account.byok?.configured) {
+        setSettingsOpen(true);
+        pushPreflightError(
+          convId,
+          "No API key is saved in your Encrypted Cloud Vault yet. Save your key above and click Retry.",
+          "BYOK_NOT_CONFIGURED"
+        );
+        return false;
+      }
+    }
+    if (effectiveRunMode === "trial") {
+      if (!account.authenticated) {
+        pushPreflightError(
+          convId,
+          `Sign in (Email, Google, or Facebook) to use your ${account.billing.maxTrialCount} free AI trials — or switch to BYOK for free.`,
+          "AUTH_REQUIRED"
+        );
+        return false;
+      }
+      if (account.firebaseConfigured && !account.user?.emailVerified) {
+        pushPreflightError(
+          convId,
+          "Please verify your email address in Account Settings before using your 3 free AI trials.",
+          "EMAIL_NOT_VERIFIED"
+        );
+        return false;
+      }
+      if ((account.trial?.remaining ?? 0) <= 0) {
+        pushPreflightError(
+          convId,
+          `You have used all ${account.billing.maxTrialCount} free AI trials. Upgrade via KBZPay (${account.billing.monthlyPriceMmk.toLocaleString()} MMK/mo) or switch to free BYOK.`,
+          "TRIAL_EXHAUSTED"
+        );
+        return false;
+      }
+    }
+    return true;
   };
 
   const submitPrompt = async () => {
@@ -395,34 +646,13 @@ export function LlmAssistantDrawer({
     setStagedFiles([]);
     setHistoryViewOpen(false);
 
-    if (!config.apiKey.trim()) {
-      setSettingsOpen(true);
-      updateConversationMessages(convId, (prev) => [
-        ...prev,
-        {
-          id: makeId("msg"),
-          role: "error",
-          content:
-            "LLM provider API key is missing. Add your API key above and click Retry.",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      requestAnimationFrame(() => apiKeyInputRef.current?.focus());
-      return;
-    }
+    if (!checkPreflightAccess(convId)) return;
 
     await executeLlmTurn(convId, nextHistory, currentFiles);
   };
 
   const handleRetryError = async (errorMessageId: string) => {
     if (sending || uploadingFiles || !activeConversation) return;
-
-    if (!config.apiKey.trim()) {
-      setSettingsOpen(true);
-      onAnnounce("Add your LLM provider API key above, then click Retry");
-      requestAnimationFrame(() => apiKeyInputRef.current?.focus());
-      return;
-    }
 
     const convId = activeConversation.id;
     const msgs = activeConversation.messages;
@@ -441,6 +671,8 @@ export function LlmAssistantDrawer({
       updateConversationMessages(convId, (prev) => prev.filter((m) => m.id !== errorMessageId));
       return;
     }
+
+    if (!checkPreflightAccess(convId)) return;
 
     const userFiles = msgs[userIdx].files || [];
     const retryHistory = msgs.slice(0, userIdx + 1);
@@ -495,7 +727,7 @@ export function LlmAssistantDrawer({
       >
         {open ? <X size={22} aria-hidden="true" /> : <Sparkles size={22} aria-hidden="true" />}
         <span
-          className={`mf-llm-fab-status ${hasApiKey ? "is-ready" : "is-missing-key"}`}
+          className={`mf-llm-fab-status ${isAiReady ? "is-ready" : "is-missing-key"}`}
           aria-hidden="true"
         />
       </button>
@@ -520,10 +752,8 @@ export function LlmAssistantDrawer({
         <header className="mf-llm-drawer-header">
           <div className="mf-llm-drawer-title">
             <Sparkles size={16} aria-hidden="true" />
-            <span>AI Mind Map Assistant</span>
-            <span className="mf-llm-provider-pill">
-              {LLM_PROVIDER_META[config.provider].label}
-            </span>
+            <span>AI Assistant</span>
+            <span className="mf-llm-provider-pill">{headerModeLabel}</span>
           </div>
 
           <div className="mf-llm-header-actions">
@@ -551,8 +781,8 @@ export function LlmAssistantDrawer({
               type="button"
               className={`mf-btn ${settingsOpen ? "is-active" : ""}`}
               aria-pressed={settingsOpen}
-              title="LLM Provider & API Key Settings"
-              aria-label="LLM Provider & API Key Settings"
+              title="AI Plan &amp; BYOK Key Settings"
+              aria-label="AI Plan &amp; BYOK Key Settings"
               onClick={() => setSettingsOpen((v) => !v)}
             >
               <KeyRound size={15} aria-hidden="true" />
@@ -569,123 +799,311 @@ export function LlmAssistantDrawer({
           </div>
         </header>
 
-        {/* Provider & API Key Panel (Auto-shown when key is missing) */}
-        {(settingsOpen || !hasApiKey) && (
+        {/* Compact AI Mode & Status Bar */}
+        <div className="mf-llm-mode-bar">
+          <div className="mf-llm-mode-tabs" role="tablist" aria-label="AI access mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!isUsingByok}
+              className={`mf-chip-btn ${!isUsingByok ? "is-active" : ""}`}
+              onClick={() => handleSwitchMode("managed")}
+            >
+              <Crown size={12} aria-hidden="true" /> Managed AI
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isUsingByok}
+              className={`mf-chip-btn ${isUsingByok ? "is-active" : ""}`}
+              onClick={() => handleSwitchMode("byok")}
+            >
+              <KeyRound size={12} aria-hidden="true" /> BYOK (Free)
+            </button>
+          </div>
+
+          {!isUsingByok ? (
+            !account.authenticated ? (
+              <button type="button" className="mf-chip-btn" onClick={onOpenAuth}>
+                <UserCheck size={12} aria-hidden="true" /> Sign in for {account.billing.maxTrialCount} Free Tries
+              </button>
+            ) : isProActive ? (
+              <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
+                {account.quota?.monthlyRemaining ?? 0}/{account.quota?.monthlyLimit ?? 150} left · Pro
+              </button>
+            ) : (
+              <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
+                <Crown size={12} aria-hidden="true" />{" "}
+                {(account.trial?.remaining ?? 0) > 0
+                  ? `${account.trial?.remaining} tries left · Upgrade`
+                  : "Upgrade (1,000 MMK/mo)"}
+              </button>
+            )
+          ) : (
+            <button
+              type="button"
+              className="mf-chip-btn"
+              onClick={() => setSettingsOpen((o) => !o)}
+            >
+              <ShieldCheck size={12} aria-hidden="true" />{" "}
+              {effectiveRunMode === "byok_vault"
+                ? account.byok?.configured
+                  ? `Vault ${account.byok.keyHint || "Ready"}`
+                  : "Set Vault Key"
+                : config.apiKey.trim()
+                ? "RAM Key Ready"
+                : "Set RAM Key"}
+            </button>
+          )}
+        </div>
+
+        {/* AI Settings / Hybrid BYOK Vault Panel */}
+        {settingsOpen && (
           <form className="mf-llm-key-panel" onSubmit={handleSaveConfig}>
             <div className="mf-llm-key-header">
               <div className="mf-llm-key-title">
-                <KeyRound size={14} aria-hidden="true" />
+                <Lock size={14} aria-hidden="true" />
                 <span>
-                  {hasApiKey
-                    ? "LLM Provider Settings"
-                    : "Add LLM Provider API Key to Continue"}
+                  {isDraftByok ? "BYOK Security & Provider Settings" : "Managed AI Plan Settings"}
                 </span>
               </div>
-              {hasApiKey && (
-                <button
-                  type="button"
-                  className="mf-chip-btn"
-                  onClick={() => setSettingsOpen(false)}
-                >
-                  Hide
-                </button>
-              )}
+              <button
+                type="button"
+                className="mf-chip-btn"
+                onClick={() => setSettingsOpen(false)}
+              >
+                Hide
+              </button>
             </div>
 
-            {!hasApiKey && (
-              <p className="mf-llm-key-notice">
-                Please add your LLM provider key (stored locally in your browser) so the assistant
-                can create and modify nodes from your prompts and files.
-              </p>
+            {!isDraftByok ? (
+              <div className="mf-llm-managed-card">
+                {!account.authenticated ? (
+                  <>
+                    <p className="mf-llm-key-notice">
+                      Guests get unlimited free mind mapping. Sign in (Email, Google, or Facebook)
+                      to try AI {account.billing.maxTrialCount} times for free, or switch to{" "}
+                      <strong>BYOK</strong> to use your own API key.
+                    </p>
+                    <div className="mf-inline-actions">
+                      <button type="button" className="mf-btn mf-btn-primary" onClick={onOpenAuth}>
+                        Sign In / Create Account
+                      </button>
+                      <button
+                        type="button"
+                        className="mf-chip-btn"
+                        onClick={() => handleSwitchMode("byok")}
+                      >
+                        Use BYOK Instead
+                      </button>
+                    </div>
+                  </>
+                ) : isProActive ? (
+                  <>
+                    <p className="mf-llm-key-notice">
+                      <strong>Pro Active</strong> ({account.subscription?.plan}) · Model:{" "}
+                      <code>{account.billing.managedModel}</code> · Quota:{" "}
+                      {account.quota?.dailyRemaining}/{account.quota?.dailyLimit} today,{" "}
+                      {account.quota?.monthlyRemaining}/{account.quota?.monthlyLimit} this month.
+                    </p>
+                    <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
+                      Manage Subscription / Receipt History
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="mf-llm-key-notice">
+                      Free trial: <strong>{account.trial?.remaining ?? 0}</strong> of{" "}
+                      {account.billing.maxTrialCount} left (Model:{" "}
+                      <code>{account.billing.trialModel}</code>). Upgrade via KBZPay for{" "}
+                      <strong>{account.billing.monthlyPriceMmk.toLocaleString()} MMK/mo</strong> or{" "}
+                      <strong>{account.billing.yearlyPriceMmk.toLocaleString()} MMK/yr</strong>.
+                    </p>
+                    <div className="mf-inline-actions">
+                      <button
+                        type="button"
+                        className="mf-btn mf-btn-primary"
+                        onClick={onOpenSubscription}
+                      >
+                        <Crown size={14} aria-hidden="true" /> Upgrade via KBZPay
+                      </button>
+                      <button
+                        type="button"
+                        className="mf-chip-btn"
+                        onClick={() => handleSwitchMode("byok")}
+                      >
+                        Switch to Free BYOK
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="mf-llm-storage-toggle" role="radiogroup" aria-label="BYOK key storage">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draftConfig.byokStorage !== "session"}
+                    className={`mf-chip-btn ${
+                      draftConfig.byokStorage !== "session" ? "is-active" : ""
+                    }`}
+                    onClick={() =>
+                      setDraftConfig((prev) => ({
+                        ...prev,
+                        mode: "byok_vault",
+                        byokStorage: "vault",
+                      }))
+                    }
+                  >
+                    <ShieldCheck size={12} aria-hidden="true" /> Encrypted Cloud Vault (AES-256)
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draftConfig.byokStorage === "session"}
+                    className={`mf-chip-btn ${
+                      draftConfig.byokStorage === "session" ? "is-active" : ""
+                    }`}
+                    onClick={() =>
+                      setDraftConfig((prev) => ({
+                        ...prev,
+                        mode: "byok_session",
+                        byokStorage: "session",
+                      }))
+                    }
+                  >
+                    <Lock size={12} aria-hidden="true" /> Session-Only (RAM)
+                  </button>
+                </div>
+
+                <p className="mf-help-text" style={{ margin: 0 }}>
+                  {draftConfig.byokStorage === "session"
+                    ? "Session-Only keys live strictly in browser RAM, never touch localStorage or our database, and vanish on tab close."
+                    : account.byok?.configured
+                    ? `Vaulted key (${account.byok.keyHint}) is AES-256-GCM encrypted on the server and never sent back to browsers.`
+                    : "Encrypted Vault keys are encrypted with AES-256-GCM on our server (never stored in localStorage)."}
+                </p>
+
+                <div className="mf-llm-key-grid">
+                  <div className="mf-llm-field">
+                    <label htmlFor={providerSelectId}>Provider</label>
+                    <select
+                      id={providerSelectId}
+                      className="mf-select"
+                      value={draftConfig.provider}
+                      onChange={(e) => {
+                        const nextProv = e.target.value as LlmProviderId;
+                        setDraftConfig((prev) => ({
+                          ...prev,
+                          provider: nextProv,
+                          model: LLM_PROVIDER_META[nextProv].defaultModel,
+                        }));
+                      }}
+                    >
+                      {(Object.keys(LLM_PROVIDER_META) as LlmProviderId[]).map((pid) => (
+                        <option key={pid} value={pid}>
+                          {LLM_PROVIDER_META[pid].label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="mf-llm-field">
+                    <label htmlFor={modelInputId}>Model</label>
+                    <input
+                      id={modelInputId}
+                      type="text"
+                      list={`${modelInputId}-list`}
+                      value={draftConfig.model}
+                      onChange={(e) =>
+                        setDraftConfig((prev) => ({ ...prev, model: e.target.value }))
+                      }
+                      placeholder={LLM_PROVIDER_META[draftConfig.provider].defaultModel}
+                    />
+                    <datalist id={`${modelInputId}-list`}>
+                      {LLM_PROVIDER_META[draftConfig.provider].models.map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+
+                {draftConfig.provider === "custom" && (
+                  <div className="mf-llm-field">
+                    <label htmlFor={baseUrlInputId}>Base URL (HTTPS only)</label>
+                    <input
+                      id={baseUrlInputId}
+                      type="url"
+                      value={draftConfig.baseUrl || ""}
+                      onChange={(e) =>
+                        setDraftConfig((prev) => ({ ...prev, baseUrl: e.target.value }))
+                      }
+                      placeholder={LLM_PROVIDER_META.custom.baseUrlPlaceholder}
+                    />
+                  </div>
+                )}
+
+                <div className="mf-llm-field">
+                  <label htmlFor={apiKeyInputId}>
+                    API Key{" "}
+                    {draftConfig.byokStorage !== "session" && account.byok?.configured
+                      ? `(Saved: ${account.byok.keyHint})`
+                      : ""}
+                  </label>
+                  <div className="mf-llm-key-input-row">
+                    <input
+                      ref={apiKeyInputRef}
+                      id={apiKeyInputId}
+                      type={showKey ? "text" : "password"}
+                      value={draftConfig.apiKey}
+                      onChange={(e) =>
+                        setDraftConfig((prev) => ({ ...prev, apiKey: e.target.value }))
+                      }
+                      placeholder={
+                        draftConfig.byokStorage !== "session" && account.byok?.configured
+                          ? "Enter new key to rotate (or leave blank to keep)"
+                          : LLM_PROVIDER_META[draftConfig.provider].keyPlaceholder
+                      }
+                      autoComplete="off"
+                    />
+                    <button
+                      type="button"
+                      className="mf-btn"
+                      aria-label={showKey ? "Hide API key" : "Show API key"}
+                      onClick={() => setShowKey((s) => !s)}
+                    >
+                      {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                    <button type="submit" className="mf-btn mf-btn-primary" disabled={savingSettings}>
+                      {savingSettings ? (
+                        <Loader2 size={14} className="mf-spin" aria-hidden="true" />
+                      ) : (
+                        <Check size={14} aria-hidden="true" />
+                      )}
+                      <span>Save</span>
+                    </button>
+                    {draftConfig.byokStorage !== "session" && account.byok?.configured && (
+                      <button
+                        type="button"
+                        className="mf-btn"
+                        title="Delete vaulted key"
+                        aria-label="Delete vaulted key"
+                        disabled={savingSettings}
+                        onClick={() => void handleDeleteVaultKey()}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {settingsFeedback && (
+                  <p className="mf-help-text" role="status">
+                    {settingsFeedback}
+                  </p>
+                )}
+              </>
             )}
-
-            <div className="mf-llm-key-grid">
-              <div className="mf-llm-field">
-                <label htmlFor={providerSelectId}>Provider</label>
-                <select
-                  id={providerSelectId}
-                  className="mf-select"
-                  value={draftConfig.provider}
-                  onChange={(e) => {
-                    const nextProv = e.target.value as LlmProviderId;
-                    setDraftConfig((prev) => ({
-                      ...prev,
-                      provider: nextProv,
-                      model: LLM_PROVIDER_META[nextProv].defaultModel,
-                    }));
-                  }}
-                >
-                  {(Object.keys(LLM_PROVIDER_META) as LlmProviderId[]).map((pid) => (
-                    <option key={pid} value={pid}>
-                      {LLM_PROVIDER_META[pid].label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="mf-llm-field">
-                <label htmlFor={modelInputId}>Model</label>
-                <input
-                  id={modelInputId}
-                  type="text"
-                  list={`${modelInputId}-list`}
-                  value={draftConfig.model}
-                  onChange={(e) =>
-                    setDraftConfig((prev) => ({ ...prev, model: e.target.value }))
-                  }
-                  placeholder={LLM_PROVIDER_META[draftConfig.provider].defaultModel}
-                />
-                <datalist id={`${modelInputId}-list`}>
-                  {LLM_PROVIDER_META[draftConfig.provider].models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
-
-            {draftConfig.provider === "custom" && (
-              <div className="mf-llm-field">
-                <label htmlFor={baseUrlInputId}>Base URL</label>
-                <input
-                  id={baseUrlInputId}
-                  type="url"
-                  value={draftConfig.baseUrl || ""}
-                  onChange={(e) =>
-                    setDraftConfig((prev) => ({ ...prev, baseUrl: e.target.value }))
-                  }
-                  placeholder={LLM_PROVIDER_META.custom.baseUrlPlaceholder}
-                />
-              </div>
-            )}
-
-            <div className="mf-llm-field">
-              <label htmlFor={apiKeyInputId}>API Key</label>
-              <div className="mf-llm-key-input-row">
-                <input
-                  ref={apiKeyInputRef}
-                  id={apiKeyInputId}
-                  type={showKey ? "text" : "password"}
-                  value={draftConfig.apiKey}
-                  onChange={(e) =>
-                    setDraftConfig((prev) => ({ ...prev, apiKey: e.target.value }))
-                  }
-                  placeholder={LLM_PROVIDER_META[draftConfig.provider].keyPlaceholder}
-                  autoComplete="off"
-                />
-                <button
-                  type="button"
-                  className="mf-btn"
-                  aria-label={showKey ? "Hide API key" : "Show API key"}
-                  onClick={() => setShowKey((s) => !s)}
-                >
-                  {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-                <button type="submit" className="mf-btn mf-btn-primary">
-                  <Check size={14} aria-hidden="true" />
-                  <span>Save</span>
-                </button>
-              </div>
-            </div>
           </form>
         )}
 
@@ -846,6 +1264,40 @@ export function LlmAssistantDrawer({
                         >
                           <RotateCcw size={12} aria-hidden="true" /> Retry
                         </button>
+                        {(errorCodes[msg.id] === "AUTH_REQUIRED" ||
+                          errorCodes[msg.id] === "EMAIL_NOT_VERIFIED") && (
+                          <button
+                            type="button"
+                            className="mf-chip-btn"
+                            onClick={onOpenAuth}
+                          >
+                            <UserCheck size={12} aria-hidden="true" /> Sign In / Verify
+                          </button>
+                        )}
+                        {(errorCodes[msg.id] === "TRIAL_EXHAUSTED" ||
+                          errorCodes[msg.id] === "SUBSCRIPTION_REQUIRED" ||
+                          errorCodes[msg.id] === "QUOTA_EXCEEDED" ||
+                          errorCodes[msg.id]?.startsWith("TRIAL_ABUSE_")) && (
+                          <>
+                            <button
+                              type="button"
+                              className="mf-chip-btn"
+                              onClick={onOpenSubscription}
+                            >
+                              <Crown size={12} aria-hidden="true" /> Upgrade KBZPay
+                            </button>
+                            <button
+                              type="button"
+                              className="mf-chip-btn"
+                              onClick={() => {
+                                handleSwitchMode("byok");
+                                setSettingsOpen(true);
+                              }}
+                            >
+                              <KeyRound size={12} aria-hidden="true" /> Use BYOK (Free)
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           className="mf-chip-btn"
@@ -854,7 +1306,7 @@ export function LlmAssistantDrawer({
                             requestAnimationFrame(() => apiKeyInputRef.current?.focus());
                           }}
                         >
-                          <KeyRound size={12} aria-hidden="true" /> Check API Key
+                          <KeyRound size={12} aria-hidden="true" /> AI Settings
                         </button>
                         {msg.rawError && (
                           <button
