@@ -137,12 +137,13 @@ Every new feature or bug fix **must** follow this exact Git workflow:
    git merge develop
    git checkout develop
    ```
-6. **Push only after user confirmation:**
+6. **Push Flow (only after user confirmation):**
    - **Never** push to a remote automatically.
-   - Once the user confirms they want to push, push **all three branches** (`<feature-or-fix-branch>`, `develop`, and `main`):
+   - Once the user confirms they want to push, push **all relevant feature/fix branches** along with `develop` and `main`:
      ```sh
      git push -u origin <feature-or-fix-branch> develop main
      ```
+   - If multiple feature/fix branches were merged locally before pushing, include all of them in the push command so `origin` stays in sync.
 
 ---
 
