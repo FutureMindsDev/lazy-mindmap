@@ -634,6 +634,18 @@ button svg[class*="lucide-chevron"] {
   gap: 6px;
 }
 
+.mf-preview-chip-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mf-preview-chip-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mf-preview-chip-grid-4 .mf-option-preview-svg {
+  width: 56px;
+}
+
 .mf-chip-btn.mf-preview-chip-btn {
   display: flex;
   flex-direction: column;

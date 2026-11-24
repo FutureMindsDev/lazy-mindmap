@@ -158,6 +158,60 @@ export function FloatingCrossLinkToolbar({
     }
   };
 
+  const renderPreviewHead = (side: "start" | "end", shape: CrossLinkHeadType) => {
+    if (shape === "none") return null;
+    if (shape === "arrow") {
+      return side === "start" ? (
+        <polygon points="15,12 22,8.5 22,15.5" fill="currentColor" />
+      ) : (
+        <polygon points="57,12 50,8.5 50,15.5" fill="currentColor" />
+      );
+    }
+    const cx = side === "start" ? 18.5 : 53.5;
+    if (shape === "circle-filled") {
+      return <circle cx={cx} cy="12" r="3.4" fill="currentColor" />;
+    }
+    return (
+      <circle
+        cx={cx}
+        cy="12"
+        r="3.1"
+        fill="var(--bg-surface)"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+    );
+  };
+
+  const renderOptionPreviewSvg = (
+    sHead: CrossLinkHeadType,
+    eHead: CrossLinkHeadType,
+    dash?: string
+  ) => (
+    <svg
+      className="mf-option-preview-svg"
+      viewBox="0 0 72 24"
+      width="72"
+      height="24"
+      aria-hidden="true"
+    >
+      <rect x="2" y="5" width="13" height="14" rx="3.5" className="mf-svg-node" />
+      <rect x="57" y="5" width="13" height="14" rx="3.5" className="mf-svg-node" />
+      <line
+        x1={sHead === "none" ? 15 : 21}
+        y1="12"
+        x2={eHead === "none" ? 57 : 51}
+        y2="12"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeDasharray={dash}
+      />
+      {renderPreviewHead("start", sHead)}
+      {renderPreviewHead("end", eHead)}
+    </svg>
+  );
+
   return (
     <div
       ref={barRef}
@@ -393,13 +447,14 @@ export function FloatingCrossLinkToolbar({
       )}
 
       {activePopover === "heads" && (
-        <div className="mf-ctx-popover" style={{ minWidth: 310 }}>
+        <div className="mf-ctx-popover" style={{ minWidth: 330 }}>
           <div className="mf-ctx-popover-title">Arrowheads &amp; Sides</div>
+
           <div className="mf-ctx-popover-sub">Sides</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          <div className="mf-preview-chip-grid mf-preview-chip-grid-2" style={{ marginBottom: 10 }}>
             <button
               type="button"
-              className={`mf-chip-btn ${!isBothSides && (startHead !== "none" || endHead !== "none") ? "is-active" : ""}`}
+              className={`mf-chip-btn mf-preview-chip-btn ${!isBothSides && (startHead !== "none" || endHead !== "none") ? "is-active" : ""}`}
               aria-pressed={!isBothSides && (startHead !== "none" || endHead !== "none")}
               onClick={() =>
                 onUpdateCrossLink({
@@ -408,11 +463,12 @@ export function FloatingCrossLinkToolbar({
                 })
               }
             >
-              One Side
+              {renderOptionPreviewSvg("none", primaryHeadShape)}
+              <span className="mf-preview-chip-label">One Side</span>
             </button>
             <button
               type="button"
-              className={`mf-chip-btn ${isBothSides ? "is-active" : ""}`}
+              className={`mf-chip-btn mf-preview-chip-btn ${isBothSides ? "is-active" : ""}`}
               aria-pressed={isBothSides}
               onClick={() =>
                 onUpdateCrossLink({
@@ -421,12 +477,13 @@ export function FloatingCrossLinkToolbar({
                 })
               }
             >
-              Both Sides
+              {renderOptionPreviewSvg(primaryHeadShape, primaryHeadShape)}
+              <span className="mf-preview-chip-label">Both Sides</span>
             </button>
           </div>
 
           <div className="mf-ctx-popover-sub">Arrowhead Style</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          <div className="mf-preview-chip-grid" style={{ marginBottom: 10 }}>
             {(
               [
                 { id: "arrow", label: "Pointed Arrow" },
@@ -440,9 +497,8 @@ export function FloatingCrossLinkToolbar({
                 <button
                   key={opt.id}
                   type="button"
-                  className={`mf-chip-btn ${active ? "is-active" : ""}`}
+                  className={`mf-chip-btn mf-preview-chip-btn ${active ? "is-active" : ""}`}
                   aria-pressed={active}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
                   onClick={() => {
                     if (isBothSides) {
                       onUpdateCrossLink({ startHead: opt.id, endHead: opt.id });
@@ -453,37 +509,15 @@ export function FloatingCrossLinkToolbar({
                     }
                   }}
                 >
-                  <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true">
-                    <line
-                      x1="1"
-                      y1="5"
-                      x2="13"
-                      y2="5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                    {opt.id === "arrow" && <polygon points="17,5 11,2 11,8" fill="currentColor" />}
-                    {opt.id === "circle-filled" && <circle cx="14" cy="5" r="3" fill="currentColor" />}
-                    {opt.id === "circle-outline" && (
-                      <circle
-                        cx="14"
-                        cy="5"
-                        r="2.7"
-                        fill="var(--bg-surface)"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                      />
-                    )}
-                  </svg>
-                  <span>{opt.label}</span>
+                  {renderOptionPreviewSvg(isBothSides ? opt.id : "none", opt.id)}
+                  <span className="mf-preview-chip-label">{opt.label}</span>
                 </button>
               );
             })}
           </div>
 
           <div className="mf-ctx-popover-sub">Start Side</div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+          <div className="mf-preview-chip-grid mf-preview-chip-grid-4" style={{ marginBottom: 8 }}>
             {(
               [
                 { id: "none", label: "None" },
@@ -495,17 +529,18 @@ export function FloatingCrossLinkToolbar({
               <button
                 key={`start-${opt.id}`}
                 type="button"
-                className={`mf-chip-btn ${startHead === opt.id ? "is-active" : ""}`}
+                className={`mf-chip-btn mf-preview-chip-btn ${startHead === opt.id ? "is-active" : ""}`}
                 aria-pressed={startHead === opt.id}
                 onClick={() => onUpdateCrossLink({ startHead: opt.id })}
               >
-                {opt.label}
+                {renderOptionPreviewSvg(opt.id, "none")}
+                <span className="mf-preview-chip-label">{opt.label}</span>
               </button>
             ))}
           </div>
 
           <div className="mf-ctx-popover-sub">End Side</div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          <div className="mf-preview-chip-grid mf-preview-chip-grid-4">
             {(
               [
                 { id: "none", label: "None" },
@@ -517,11 +552,12 @@ export function FloatingCrossLinkToolbar({
               <button
                 key={`end-${opt.id}`}
                 type="button"
-                className={`mf-chip-btn ${endHead === opt.id ? "is-active" : ""}`}
+                className={`mf-chip-btn mf-preview-chip-btn ${endHead === opt.id ? "is-active" : ""}`}
                 aria-pressed={endHead === opt.id}
                 onClick={() => onUpdateCrossLink({ endHead: opt.id })}
               >
-                {opt.label}
+                {renderOptionPreviewSvg("none", opt.id)}
+                <span className="mf-preview-chip-label">{opt.label}</span>
               </button>
             ))}
           </div>
