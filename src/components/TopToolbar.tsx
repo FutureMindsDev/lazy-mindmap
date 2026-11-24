@@ -268,7 +268,7 @@ export function TopToolbar({
         <span className="mf-brand-badge" aria-hidden="true">
           M
         </span>
-        <span>MindForge</span>
+        <span>LazyMindmap</span>
       </div>
 
       <div

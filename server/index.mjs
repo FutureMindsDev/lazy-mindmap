@@ -74,7 +74,7 @@ export function startServer(customPort = port) {
   });
 
   server.listen(customPort, "0.0.0.0", () => {
-    console.log(`MindForge server listening on http://0.0.0.0:${customPort} (data: ${dataDir})`);
+    console.log(`LazyMindmap server listening on http://0.0.0.0:${customPort} (data: ${dataDir})`);
   });
 
   return server;

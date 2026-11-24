@@ -826,7 +826,7 @@ export function LlmAssistantDrawer({
                         ? "You"
                         : msg.role === "error"
                         ? "API Error"
-                        : "MindForge AI"}
+                        : "LazyMindmap AI"}
                     </span>
                     <span className="mf-llm-msg-time">{formatTime(msg.createdAt)}</span>
                   </div>

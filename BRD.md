@@ -1,5 +1,5 @@
 # Business Requirements Document (BRD)
-## MindForge — Keyboard-First, Rich-Content Mind Mapping Web Application
+## LazyMindmap — Keyboard-First, Rich-Content Mind Mapping Web Application
 
 **Document Version:** 1.1 (Approved)  
 **Date:** November 23, 2026  
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary & Product Vision
 
-**MindForge** (working title) is a high-speed, keyboard-first, rich-content mind mapping web application designed to unite:
+**LazyMindmap** (working title) is a high-speed, keyboard-first, rich-content mind mapping web application designed to unite:
 - **MindMeister's** visual polish, flexible layouts, branch color cascades, and presentation-ready styling.
 - **MindMup's** rapid, zero-mouse keyboard-centric creation and navigation workflow.
 - **Obsidian / Notion-grade** rich node rendering capable of displaying photos, universal AI/LLM mathematical formulas, syntax-highlighted code blocks, interactive checklists, tables, diagrams, and file attachments inside every node.
@@ -49,7 +49,7 @@ Before designing the math rendering engine, an investigation was conducted into 
 
 ### 2.3 Required Solution: Universal LLM Math Pipeline
 
-To make pasting or typing formulas from **any** LLM seamless, MindForge will implement a three-stage math pipeline:
+To make pasting or typing formulas from **any** LLM seamless, LazyMindmap will implement a three-stage math pipeline:
 
 1. **Pre-Markdown Math Tokenizer & Normalizer:**
    - Runs **before** Markdown backslash escaping and inline emphasis (`_`, `*`) rules so formulas are isolated into protected tokens and never mangled.

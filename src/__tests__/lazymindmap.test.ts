@@ -574,7 +574,7 @@ describe("LLM Mind Map Assistant Agent", () => {
         ])
       ).toBe("Add Quantum Computing with qubits and g…");
 
-      // Legacy migration from mindforge:llmChatHistory
+      // Legacy migration from lazymindmap:llmChatHistory
       store.set(
         LLM_HISTORY_STORAGE_KEY,
         JSON.stringify([

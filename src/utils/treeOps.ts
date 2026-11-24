@@ -38,7 +38,7 @@ export function createInitialMap(): MindMapDocument {
       id: rootId,
       parentId: null,
       childrenIds: [b1, b2, b3, b4],
-      text: "🧠 **MindForge Workspace**\nPress `Ctrl + /` for MindMup Shortcuts",
+      text: "🧠 **LazyMindmap Workspace**\nPress `Ctrl + /` for MindMup Shortcuts",
       stickers: ["🚀"],
       style: { shape: "rounded", fontSize: 16 },
     },
@@ -120,7 +120,7 @@ export function createInitialMap(): MindMapDocument {
 
   return {
     id: makeId("map"),
-    title: "MindForge Starter Map",
+    title: "LazyMindmap Starter Map",
     rootIds: [rootId],
     nodes,
     crossLinks: [
