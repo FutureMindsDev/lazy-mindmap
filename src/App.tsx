@@ -86,6 +86,7 @@ import {
   getNodeMoveCapabilities,
   getSiblingIds,
   getSubtreeIds,
+  getVisibleDragPreviewIds,
   insertParentNode,
   insertSubtreeBranches,
   makeId,
@@ -1851,36 +1852,69 @@ export function App() {
     ]
   );
 
-  const canvasWorldContent = useMemo(
-    () => (
+  const activeDragNodeId = dragState?.nodeId ?? draggingRootId;
+  const dragPreviewIds = useMemo(
+    () => getVisibleDragPreviewIds(doc, activeDragNodeId),
+    [doc, activeDragNodeId]
+  );
+
+  const canvasWorldContent = useMemo(() => {
+    const sharedDragOffset = dragState ? { dx: dragState.dx, dy: dragState.dy } : null;
+    const staticBranchPaths: React.ReactElement[] = [];
+    const draggedBranchPaths: React.ReactElement[] = [];
+
+    for (const node of Object.values(doc.nodes)) {
+      const pLayout = layouts[node.id];
+      if (!pLayout || node.collapsed) continue;
+      const parentInPreview = dragPreviewIds.has(node.id);
+      for (const cid of node.childrenIds) {
+        const cLayout = layouts[cid];
+        if (!cLayout) continue;
+        const path = buildConnectorPath(pLayout, cLayout, doc.connectorStyle, doc.layout);
+        const strokeWidth = Math.max(1.8, 3.2 - cLayout.depth * 0.4);
+        const childInPreview = dragPreviewIds.has(cid);
+
+        if (parentInPreview && childInPreview) {
+          draggedBranchPaths.push(
+            <path
+              key={`${node.id}-${cid}`}
+              d={path}
+              fill="none"
+              stroke={cLayout.branchColor}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+            />
+          );
+        } else {
+          const isDetachingTether = Boolean(dragState && cid === dragState.nodeId);
+          staticBranchPaths.push(
+            <path
+              key={`${node.id}-${cid}`}
+              d={path}
+              fill="none"
+              stroke={cLayout.branchColor}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeDasharray={isDetachingTether ? "5 5" : undefined}
+              opacity={isDetachingTether ? 0.28 : undefined}
+            />
+          );
+        }
+      }
+    }
+
+    return (
       <>
         {/* Back SVG layer: tree branch connectors + cross-links layered behind nodes */}
         <svg className="mf-svg-layer mf-svg-branches">
-          {Object.values(doc.nodes).map((node) => {
-            const pLayout = layouts[node.id];
-            if (!pLayout || node.collapsed) return null;
-            return node.childrenIds.map((cid) => {
-              const cLayout = layouts[cid];
-              if (!cLayout) return null;
-              const path = buildConnectorPath(pLayout, cLayout, doc.connectorStyle, doc.layout);
-              return (
-                <path
-                  key={`${node.id}-${cid}`}
-                  d={path}
-                  fill="none"
-                  stroke={cLayout.branchColor}
-                  strokeWidth={Math.max(1.8, 3.2 - cLayout.depth * 0.4)}
-                  strokeLinecap="round"
-                />
-              );
-            });
-          })}
+          {staticBranchPaths}
           {renderCrossLinkSvgLayer("behind")}
         </svg>
 
         {Object.values(layouts).map((info: LayoutNodeInfo) => {
           const node = doc.nodes[info.id];
           if (!node) return null;
+          const inPreview = dragPreviewIds.has(node.id);
           return (
             <MindMapNodeCard
               key={node.id}
@@ -1891,10 +1925,8 @@ export function App() {
               isSelected={selectedIds.includes(node.id)}
               isEditing={editingId === node.id}
               isCrossLinkSource={crossLinkSourceId === node.id}
-              isDragging={dragState?.nodeId === node.id || draggingRootId === node.id}
-              dragOffset={
-                dragState?.nodeId === node.id ? { dx: dragState.dx, dy: dragState.dy } : null
-              }
+              isDragging={inPreview}
+              dragOffset={inPreview && sharedDragOffset ? sharedDragOffset : null}
               onSelect={handleSelectNode}
               onStartEdit={setEditingId}
               onCommitEdit={handleCommitEdit}
@@ -1916,6 +1948,20 @@ export function App() {
             />
           );
         })}
+
+        {draggedBranchPaths.length > 0 && (
+          <svg className="mf-svg-layer mf-svg-drag-preview">
+            <g
+              transform={
+                sharedDragOffset
+                  ? `translate(${sharedDragOffset.dx}, ${sharedDragOffset.dy})`
+                  : undefined
+              }
+            >
+              {draggedBranchPaths}
+            </g>
+          </svg>
+        )}
 
         {dragDropHint && (
           <div
@@ -1943,39 +1989,38 @@ export function App() {
           {renderCrossLinkSvgLayer("above")}
         </svg>
       </>
-    ),
-    [
-      doc.nodes,
-      doc.connectorStyle,
-      doc.layout,
-      doc.colorMode,
-      layouts,
-      selectedIds,
-      editingId,
-      crossLinkSourceId,
-      dragState,
-      draggingRootId,
-      dragDropHint,
-      getZoomScale,
-      handleSelectNode,
-      handleCommitEdit,
-      handleCancelEdit,
-      handleUpdateNodeTextDirect,
-      handleToggleCollapse,
-      handleAddChildQuick,
-      handleResizeNode,
-      handleResizeImage,
-      handleUpdateImageProps,
-      handleRemoveImage,
-      attachFilesToNode,
-      handlePasteImageInEditor,
-      handleOpenDrawerForNode,
-      handleSizeChange,
-      announce,
-      handleDragNodeStart,
-      renderCrossLinkSvgLayer,
-    ]
-  );
+    );
+  }, [
+    doc.nodes,
+    doc.connectorStyle,
+    doc.layout,
+    doc.colorMode,
+    layouts,
+    selectedIds,
+    editingId,
+    crossLinkSourceId,
+    dragState,
+    dragPreviewIds,
+    dragDropHint,
+    getZoomScale,
+    handleSelectNode,
+    handleCommitEdit,
+    handleCancelEdit,
+    handleUpdateNodeTextDirect,
+    handleToggleCollapse,
+    handleAddChildQuick,
+    handleResizeNode,
+    handleResizeImage,
+    handleUpdateImageProps,
+    handleRemoveImage,
+    attachFilesToNode,
+    handlePasteImageInEditor,
+    handleOpenDrawerForNode,
+    handleSizeChange,
+    announce,
+    handleDragNodeStart,
+    renderCrossLinkSvgLayer,
+  ]);
 
   return (
     <div className="mf-app">

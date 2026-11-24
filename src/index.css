@@ -817,6 +817,11 @@ button svg[class*="lucide-chevron"] {
   z-index: 32;
 }
 
+.mf-svg-drag-preview {
+  z-index: 38;
+  opacity: 0.78;
+}
+
 .mf-crosslink-label {
   paint-order: stroke fill;
   stroke: var(--bg-surface);
