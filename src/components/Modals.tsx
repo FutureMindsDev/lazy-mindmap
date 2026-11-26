@@ -283,7 +283,7 @@ export function ImageLightboxModal({
             alt={image.caption || image.name}
             style={{ maxWidth: "100%", maxHeight: "72vh", borderRadius: 8 }}
           />
-          <a href={image.url} download={image.name} className="mf-btn mf-btn-primary">
+          <a href={image.url} target="_blank" rel="noopener noreferrer" download={image.name} className="mf-btn mf-btn-primary">
             Download Original
           </a>
         </div>
