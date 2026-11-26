@@ -10,14 +10,18 @@ import {
 import { extractMarkdownFromHtml, renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   callLlmProvider,
+  clearLlmComposerDraft,
   createNewConversation,
   deriveConversationTitle,
   findRelatedNodes,
   LLM_CONVERSATIONS_STORAGE_KEY,
+  LLM_DRAFT_STORAGE_KEY,
   LLM_HISTORY_STORAGE_KEY,
   LlmApiError,
+  loadLlmComposerDraftSync,
   loadLlmConversations,
   parseAndApplyLlmResponse,
+  saveLlmComposerDraftSync,
   saveLlmConversations,
 } from "../utils/llmMindMapAgent";
 import { parseMarkdownToSubtree } from "../utils/markdownToSubtree";
@@ -628,6 +632,113 @@ describe("LLM Mind Map Assistant Agent", () => {
       const reloaded = loadLlmConversations();
       expect(reloaded).toHaveLength(2);
       expect(reloaded[0].messages[0].files?.[0].name).toBe("paper.pdf");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists AI composer prompt text and staged files across reloads and clears on submit", async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+    });
+
+    try {
+      saveLlmComposerDraftSync("Draft prompt about Quantum Computing", [
+        {
+          id: "chatf_1",
+          name: "diagram.png",
+          url: "/uploads/diagram.png",
+          mimeType: "image/png",
+          size: 4096,
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+          textContent: undefined,
+        },
+        {
+          id: "chatf_2",
+          name: "notes.md",
+          url: "/uploads/notes.md",
+          mimeType: "text/markdown",
+          size: 120,
+          textContent: "# Quantum Notes\n- Qubit",
+        },
+      ]);
+
+      const loaded = loadLlmComposerDraftSync();
+      expect(loaded.prompt).toBe("Draft prompt about Quantum Computing");
+      expect(loaded.files).toHaveLength(2);
+      expect(loaded.files[0]).toMatchObject({
+        id: "chatf_1",
+        name: "diagram.png",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+      });
+      expect(loaded.files[1].textContent).toBe("# Quantum Notes\n- Qubit");
+
+      // Saving empty prompt + files clears draft from localStorage
+      saveLlmComposerDraftSync("", []);
+      expect(store.has(LLM_DRAFT_STORAGE_KEY)).toBe(false);
+      expect(loadLlmComposerDraftSync()).toEqual({ prompt: "", files: [], updatedAt: 0 });
+
+      // Oversized file payload still preserves prompt text with hasIdbFiles flag
+      saveLlmComposerDraftSync("Keep my prompt even with huge file", [
+        {
+          id: "chatf_big",
+          name: "large.pdf",
+          url: "/uploads/large.pdf",
+          mimeType: "application/pdf",
+          size: 2_000_000,
+          dataUrl: `data:application/pdf;base64,${"A".repeat(1_600_000)}`,
+        },
+      ]);
+      const largeLoaded = loadLlmComposerDraftSync();
+      expect(largeLoaded.prompt).toBe("Keep my prompt even with huge file");
+      expect(largeLoaded.files).toEqual([]);
+      expect(largeLoaded.hasIdbFiles).toBe(true);
+
+      await clearLlmComposerDraft();
+      expect(store.has(LLM_DRAFT_STORAGE_KEY)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("preserves prompt text in localStorage if QuotaExceededError is thrown on full draft payload", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (v.length > 500) {
+          throw new Error("QuotaExceededError");
+        }
+        store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+    });
+
+    try {
+      saveLlmComposerDraftSync("Urgent prompt text", [
+        {
+          id: "chatf_q",
+          name: "medium.txt",
+          url: "/uploads/medium.txt",
+          mimeType: "text/plain",
+          size: 1000,
+          textContent: "X".repeat(800),
+        },
+      ]);
+      const loaded = loadLlmComposerDraftSync();
+      expect(loaded.prompt).toBe("Urgent prompt text");
+      expect(loaded.files).toEqual([]);
+      expect(loaded.hasIdbFiles).toBe(true);
     } finally {
       vi.unstubAllGlobals();
     }
