@@ -298,7 +298,9 @@ export function TopToolbar({
         <span className="mf-brand-badge" aria-hidden="true">
           M
         </span>
-        <span>LazyMindmap</span>
+        <span className="mf-brand-name">
+          Lazy<em>Mindmap</em>
+        </span>
       </div>
 
       <div

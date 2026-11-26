@@ -1925,6 +1925,7 @@ export function App() {
               isSelected={selectedIds.includes(node.id)}
               isEditing={editingId === node.id}
               isCrossLinkSource={crossLinkSourceId === node.id}
+              isPrimaryRoot={node.id === doc.rootIds[0]}
               isDragging={inPreview}
               dragOffset={inPreview && sharedDragOffset ? sharedDragOffset : null}
               onSelect={handleSelectNode}
@@ -2648,7 +2649,7 @@ export function App() {
         >
           <ZoomOut size={17} aria-hidden="true" />
         </button>
-        <span>{Math.round(viewport.scale * 100)}%</span>
+        <span className="mf-hud-zoom">{Math.round(viewport.scale * 100)}%</span>
         <button
           type="button"
           className="mf-btn"
@@ -2657,12 +2658,14 @@ export function App() {
         >
           <ZoomIn size={17} aria-hidden="true" />
         </button>
+        <span className="mf-hud-sep" aria-hidden="true" />
         <button type="button" className="mf-btn" title="Recenter (Ctrl+0)" onClick={recenterView}>
           <Crosshair size={17} aria-hidden="true" />
         </button>
         <button type="button" className="mf-btn" title="Zoom to fit (Ctrl+1)" onClick={zoomToFit}>
           <Maximize2 size={17} aria-hidden="true" />
         </button>
+        <span className="mf-hud-sep" aria-hidden="true" />
         <div className="mf-level-menu">
           <button
             type="button"

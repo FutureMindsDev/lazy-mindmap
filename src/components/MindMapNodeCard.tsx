@@ -29,6 +29,7 @@ interface MindMapNodeCardProps {
   isSelected: boolean;
   isEditing: boolean;
   isCrossLinkSource: boolean;
+  isPrimaryRoot?: boolean;
   isDragging?: boolean;
   dragOffset?: { dx: number; dy: number } | null;
   onSelect: (id: string, additive: boolean) => void;
@@ -70,6 +71,7 @@ export const MindMapNodeCard = memo(function MindMapNodeCard({
   isSelected,
   isEditing,
   isCrossLinkSource,
+  isPrimaryRoot,
   isDragging = false,
   dragOffset = null,
   onSelect,
@@ -530,6 +532,7 @@ export const MindMapNodeCard = memo(function MindMapNodeCard({
         "mf-node",
         `shape-${shape}`,
         isRoot ? "is-root" : "",
+        isRoot && isPrimaryRoot === false ? "is-floating-root" : "",
         isSelected ? "is-selected" : "",
         isEditing ? "is-editing" : "",
         isDragging ? "is-dragging" : "",

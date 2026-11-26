@@ -85,6 +85,15 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
 - **Admin Dashboard:** Restricted to `role === "admin"` / `ADMIN_EMAILS`. Provides server-side paginated Users & KBZPay Payments tables, private receipt preview (`/api/admin/receipts/:id`), and encrypted AI key/model/quota configuration. Admin accounts also bypass all AI trial, subscription, and daily/monthly quota limits.
 - **Credentials Hygiene:** `.gitignore` ignores `*.env` and `atlas-credentials.env` while keeping `!.env.example` tracked.
 
+### 2.7 Visual Design System ("Tactile Cartography / Drafting-Studio HUD")
+- **Typography Roles (`index.html`, `src/index.css`):**
+  - `--font-ui`: `Instrument Sans` (UI controls, labels, drawers, modals).
+  - `--font-display`: `Instrument Serif` (brand wordmark, modal headers, drawer headers, plan prices).
+  - `--font-mono`: `JetBrains Mono` (keycaps, zoom/quota metrics, status pills, table headers, monospace inputs).
+  - `--font-node`: `Inter` stack kept intact for canvas node content parity with standalone exports (`src/utils/exporters.ts`).
+- **Color Tokens & Theme Parity:** Warm archival drafting-paper light surfaces (`#f2efe8` / `#fbfaf6` / `#eeebe3`) paired with obsidian ink-table dark surfaces (`#0d0e10` / `#16171a` / `#1e2024`), anchored by a single vermilion accent (`--accent-color`: `#b03a0a` light / `#ff9a5c` dark) and semantic status tokens (`--success`, `--warn`, `--danger`, `--info` + `-soft` tints). All theme-aware colors must use CSS tokens / `light-dark()` / `prefers-color-scheme` rather than `:root:has(> head > meta[name="color-scheme"][content="dark"])` overrides so system dark mode stays in sync.
+- **Frosted Glass & Motion Rules:** Translucent `backdrop-filter` glass (`--hud-bg` / `--ctx-bg`) is strictly limited to floating HUD chrome (`.mf-topbar`, `.mf-bottom-hud`, `.mf-context-toolbar`, `.mf-crosslink-mode-banner`). Drawers, popovers, and dialogs use solid surfaces (`--bg-surface` / `--bg-raised`), `--ease-spring: cubic-bezier(0.22, 1, 0.36, 1)`, and explicit property transitions (**never** `transition: all`).
+
 ---
 
 ## 3. Key Files Map
