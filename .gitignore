@@ -6,4 +6,7 @@ data
 .env
 .env.local
 .env.*.local
+*.env
+!.env.example
+atlas-credentials.env
 firebase-service-account*.json

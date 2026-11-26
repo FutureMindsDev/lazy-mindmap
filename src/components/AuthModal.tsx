@@ -15,6 +15,7 @@ import {
 import type { UserAccountState } from "../types/mindmap";
 import {
   formatFirebaseAuthError,
+  isFirebaseWebConfigured,
   reloadFirebaseUser,
   resendEmailVerification,
   sendPasswordReset,
@@ -60,7 +61,7 @@ export function AuthModal({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const firebaseReady = account.firebaseConfigured;
+  const firebaseReady = account.firebaseConfigured && isFirebaseWebConfigured();
   const isDevEnv = import.meta.env.DEV;
 
   const resetMessages = () => {
