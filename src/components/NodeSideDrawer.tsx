@@ -87,7 +87,7 @@ export function NodeSideDrawer({
               Photos ({node.images?.length || 0})
             </span>
             <button type="button" className="mf-chip-btn" onClick={onOpenImagePicker}>
-              <ImagePlus size={12} aria-hidden="true" /> Add Photo (I)
+              <ImagePlus size={15} aria-hidden="true" /> Add Photo (I)
             </button>
           </div>
           {node.images && node.images.length > 0 && (
@@ -119,7 +119,7 @@ export function NodeSideDrawer({
                     aria-label={`Remove image ${img.name}`}
                     onClick={() => onRemoveImage(node.id, img.id)}
                   >
-                    <Trash2 size={14} aria-hidden="true" />
+                    <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </div>
               ))}
@@ -137,7 +137,7 @@ export function NodeSideDrawer({
               className="mf-chip-btn"
               onClick={() => fileInputRef.current?.click()}
             >
-              <FileUp size={12} aria-hidden="true" /> Attach File
+              <FileUp size={15} aria-hidden="true" /> Attach File
             </button>
             <input
               ref={fileInputRef}
@@ -177,7 +177,7 @@ export function NodeSideDrawer({
                     aria-label={`Remove attachment ${att.name}`}
                     onClick={() => onRemoveAttachment(node.id, att.id)}
                   >
-                    <Trash2 size={14} aria-hidden="true" />
+                    <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </div>
               ))}
