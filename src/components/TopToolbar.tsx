@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useToolbarFocusGroup } from "../hooks/useToolbarFocusGroup";
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
   Clock,
   Crown,
@@ -164,6 +165,23 @@ function renderConnectorPreviewSvg(style: ConnectorStyle) {
       <rect x="50" y="4" width="18" height="8" rx="2.5" className="mf-svg-node" />
       <rect x="50" y="22" width="18" height="8" rx="2.5" className="mf-svg-node" />
     </svg>
+  );
+}
+
+/** Mini account avatar: photo when available, initial letter otherwise. */
+function TopBarAvatar({ photoURL, initial }: { photoURL: string; initial: string }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  if (!photoURL || imageFailed) {
+    return (
+      <span className="mf-pill-avatar is-fallback" aria-hidden="true">
+        {initial}
+      </span>
+    );
+  }
+  return (
+    <span className="mf-pill-avatar" aria-hidden="true">
+      <img src={photoURL} alt="" onError={() => setImageFailed(true)} />
+    </span>
   );
 }
 
@@ -387,7 +405,7 @@ export function TopToolbar({
 
         <button
           type="button"
-          className="mf-btn mf-account-pill"
+          className={`mf-btn mf-account-pill${account.authenticated ? " is-signed-in" : ""}`}
           title={
             account.authenticated
               ? `${account.user?.email || "Account"} — Manage profile & plan`
@@ -400,14 +418,45 @@ export function TopToolbar({
           }
           onClick={onOpenAuth}
         >
-          <UserCircle2 size={15} aria-hidden="true" />
-          <span>
+          {account.authenticated && account.user?.photoURL ? (
+            <TopBarAvatar
+              key={account.user.photoURL}
+              photoURL={account.user.photoURL}
+              initial={(account.user.displayName || account.user.email || "U")
+                .slice(0, 1)
+                .toUpperCase()}
+            />
+          ) : (
+            <UserCircle2 size={15} aria-hidden="true" />
+          )}
+          <span className="mf-account-pill-label">
             {account.authenticated
               ? account.user?.displayName ||
                 account.user?.email?.split("@")[0] ||
                 "Account"
               : "Sign In"}
           </span>
+          {account.authenticated && (
+            <span
+              className={`mf-account-status-dot${
+                account.subscription?.status === "active" ? " is-pro" : ""
+              }`}
+              aria-hidden="true"
+              title={
+                account.subscription?.status === "active"
+                  ? "Pro plan"
+                  : account.user?.emailVerified
+                  ? "Email verified"
+                  : "Signed in"
+              }
+            >
+              {account.subscription?.status === "active" ? (
+                <Crown size={9} />
+              ) : account.user?.emailVerified ? (
+                <Check size={9} />
+              ) : null}
+            </span>
+          )}
         </button>
 
         <button
