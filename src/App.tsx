@@ -2646,7 +2646,7 @@ export function App() {
           aria-label="Zoom out"
           onClick={() => setViewport((v) => ({ ...v, scale: Math.max(0.2, v.scale - 0.15) }))}
         >
-          <ZoomOut size={15} aria-hidden="true" />
+          <ZoomOut size={17} aria-hidden="true" />
         </button>
         <span>{Math.round(viewport.scale * 100)}%</span>
         <button
@@ -2655,13 +2655,13 @@ export function App() {
           aria-label="Zoom in"
           onClick={() => setViewport((v) => ({ ...v, scale: Math.min(2.6, v.scale + 0.15) }))}
         >
-          <ZoomIn size={15} aria-hidden="true" />
+          <ZoomIn size={17} aria-hidden="true" />
         </button>
         <button type="button" className="mf-btn" title="Recenter (Ctrl+0)" onClick={recenterView}>
-          <Crosshair size={14} aria-hidden="true" />
+          <Crosshair size={17} aria-hidden="true" />
         </button>
         <button type="button" className="mf-btn" title="Zoom to fit (Ctrl+1)" onClick={zoomToFit}>
-          <Maximize2 size={14} aria-hidden="true" />
+          <Maximize2 size={17} aria-hidden="true" />
         </button>
         <div className="mf-level-menu">
           <button
@@ -2671,7 +2671,7 @@ export function App() {
             title="Outline level (Alt+1..9)"
             onClick={() => collapseMapToLevel(1)}
           >
-            <Minimize2 size={14} aria-hidden="true" /> Expand Level
+            <Minimize2 size={17} aria-hidden="true" /> Expand Level
           </button>
           <div className="mf-level-menu-list" role="menu" aria-label="Collapse to level">
             {levelOptions.map((lvl) => (

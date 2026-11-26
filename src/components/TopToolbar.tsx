@@ -316,7 +316,7 @@ export function TopToolbar({
             title="Add detached floating root node (Ctrl+D)"
             onClick={onAddDetachedRootNode}
           >
-            <PlusSquare size={15} aria-hidden="true" />
+            <PlusSquare size={18} aria-hidden="true" />
             <span>Floating</span>
           </button>
         </div>
@@ -332,7 +332,7 @@ export function TopToolbar({
             aria-disabled={!canUndo ? "true" : undefined}
             onClick={() => canUndo && onUndo()}
           >
-            <Undo2 size={16} aria-hidden="true" />
+            <Undo2 size={18} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -342,7 +342,7 @@ export function TopToolbar({
             aria-disabled={!canRedo ? "true" : undefined}
             onClick={() => canRedo && onRedo()}
           >
-            <Redo2 size={16} aria-hidden="true" />
+            <Redo2 size={18} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -352,7 +352,7 @@ export function TopToolbar({
             aria-pressed={tool === "select"}
             onClick={() => onSetTool("select")}
           >
-            <MousePointer2 size={16} aria-hidden="true" />
+            <MousePointer2 size={18} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -362,7 +362,7 @@ export function TopToolbar({
             aria-pressed={tool === "hand"}
             onClick={() => onSetTool("hand")}
           >
-            <Hand size={16} aria-hidden="true" />
+            <Hand size={18} aria-hidden="true" />
           </button>
         </div>
 
@@ -376,7 +376,7 @@ export function TopToolbar({
             title="Search nodes (Ctrl+F)"
             onClick={onOpenSearch}
           >
-            <Search size={16} aria-hidden="true" />
+            <Search size={18} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -409,7 +409,7 @@ export function TopToolbar({
           title={
             account.authenticated
               ? `${account.user?.email || "Account"} — Manage profile & plan`
-              : "Sign in with Email, Google, or Facebook"
+              : "Sign in with Email or Google"
           }
           aria-label={
             account.authenticated

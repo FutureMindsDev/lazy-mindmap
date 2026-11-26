@@ -216,6 +216,8 @@ export function formatFirebaseAuthError(err: unknown): string {
       return "Too many attempts. Please wait a moment and try again.";
     case "auth/unauthorized-domain":
       return "This domain is not authorized in Firebase Auth settings.";
+    case "auth/operation-not-allowed":
+      return "This sign-in provider is not enabled in Firebase Console (Authentication → Sign-in method).";
     default:
       return err instanceof Error ? err.message : "Authentication failed.";
   }

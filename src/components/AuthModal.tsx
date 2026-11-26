@@ -27,7 +27,6 @@ import {
   resendEmailVerification,
   sendPasswordReset,
   signInWithEmail,
-  signInWithFacebook,
   signInWithGoogle,
   signUpWithEmail,
   type DevPreviewUser,
@@ -251,15 +250,14 @@ export function AuthModal({
     }
   };
 
-  const handleOAuth = async (provider: "google" | "facebook") => {
+  const handleGoogleSignIn = async () => {
     resetMessages();
     setBusy(true);
     try {
-      const user =
-        provider === "google" ? await signInWithGoogle() : await signInWithFacebook();
+      const user = await signInWithGoogle();
       if (user) {
         await onRefreshAccount(true);
-        onAnnounce(`Signed in with ${provider === "google" ? "Google" : "Facebook"}`);
+        onAnnounce("Signed in with Google");
         onClose();
       }
     } catch (err) {
@@ -512,19 +510,10 @@ export function AuthModal({
                 type="button"
                 className="mf-btn mf-oauth-btn mf-oauth-google"
                 disabled={busy}
-                onClick={() => handleOAuth("google")}
+                onClick={handleGoogleSignIn}
               >
                 <GoogleBrandIcon />
                 <span>Continue with Google</span>
-              </button>
-              <button
-                type="button"
-                className="mf-btn mf-oauth-btn mf-oauth-facebook"
-                disabled={busy}
-                onClick={() => handleOAuth("facebook")}
-              >
-                <FacebookBrandIcon />
-                <span>Continue with Facebook</span>
               </button>
             </div>
 
@@ -755,7 +744,7 @@ export function AuthModal({
               <strong>Firebase Auth keys not set in .env yet.</strong>
               <p style={{ margin: "4px 0 0" }}>
                 Add <code>VITE_FIREBASE_API_KEY</code> and <code>VITE_FIREBASE_PROJECT_ID</code>{" "}
-                from your Firebase project console to enable Email, Google, and Facebook sign-in.
+                from your Firebase project console to enable Email and Google sign-in.
               </p>
               {isDevEnv && (
                 <div className="mf-inline-actions" style={{ marginTop: 8 }}>

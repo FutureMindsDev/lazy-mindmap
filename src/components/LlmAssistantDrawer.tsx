@@ -600,7 +600,7 @@ export function LlmAssistantDrawer({
       if (!account.authenticated) {
         pushPreflightError(
           convId,
-          `Sign in (Email, Google, or Facebook) to use your ${account.billing.maxTrialCount} free AI trials — or switch to BYOK for free.`,
+          `Sign in (Email or Google) to use your ${account.billing.maxTrialCount} free AI trials — or switch to BYOK for free.`,
           "AUTH_REQUIRED"
         );
         return false;
@@ -881,7 +881,7 @@ export function LlmAssistantDrawer({
                 {!account.authenticated ? (
                   <>
                     <p className="mf-llm-key-notice">
-                      Guests get unlimited free mind mapping. Sign in (Email, Google, or Facebook)
+                      Guests get unlimited free mind mapping. Sign in (Email or Google)
                       to try AI {account.billing.maxTrialCount} times for free, or switch to{" "}
                       <strong>BYOK</strong> to use your own API key.
                     </p>

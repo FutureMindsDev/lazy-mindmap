@@ -76,7 +76,7 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
   - Lucide Chevron icons inside buttons get `margin-right: 4px`.
 
 ### 2.6 Multi-User Auth, MongoDB Atlas, BYOK Security, KBZPay & Admin Dashboard
-- **Auth & Cloud Storage:** Firebase Auth (free Spark, project `lazy-mindmap`, Email/Password + Google + Facebook) paired with MongoDB Atlas (`MONGODB_URI`, free M0 tier) via `server/mongoDb.mjs` (falls back to Cloud Firestore or local `data/db/` JSON in `server/db.mjs`). `FIREBASE_PROJECT_ID=lazy-mindmap` suffices on the server to verify Firebase ID tokens when using MongoDB.
+- **Auth & Cloud Storage:** Firebase Auth (free Spark, project `lazy-mindmap`, Email/Password + Google) paired with MongoDB Atlas (`MONGODB_URI`, free M0 tier) via `server/mongoDb.mjs` (falls back to Cloud Firestore or local `data/db/` JSON in `server/db.mjs`). `FIREBASE_PROJECT_ID=lazy-mindmap` suffices on the server to verify Firebase ID tokens when using MongoDB.
 - **Free Forever Core:** Mind mapping and exports are 100% free. Guests store maps locally in IndexedDB; signed-in users get free per-user cloud sync (`/api/maps` scoped by `uid`) + user-scoped IndexedDB databases (`lazymindmap_db_<uid>`).
 - **AI Access Modes (`POST /api/llm/chat`):**
   - **Free Trial (`trial`):** 3 tries for verified non-guest accounts using server-side `GEMINI_TRIAL_API_KEY` (default `gemini-3.1-flash-lite`), protected against multi-account abuse via normalized Gmail/alias email hashes, disposable-domain rejection, SHA-256 device fingerprint (`X-Device-Fingerprint`), signed `HttpOnly` `lm_device_id` cookie, and hashed IP/geo windows (`trial_ledger`).
@@ -99,12 +99,12 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
 | `src/components/MindMapNodeCard.tsx` | Rich node card rendering, inline Markdown editor, resize handles, photo actions |
 | `src/components/NodeSideDrawer.tsx` | `A` shortcut side inspector for extended notes and file attachments |
 | `src/components/LlmAssistantDrawer.tsx` | Bottom-right circular FAB + sliding AI chatbox with Managed/BYOK mode tabs, Encrypted Vault/RAM selector, and file uploads |
-| `src/components/AuthModal.tsx` | Email/Google/Facebook sign-in/sign-up/reset & verified account profile modal |
+| `src/components/AuthModal.tsx` | Email/Google sign-in/sign-up/reset & verified account profile modal |
 | `src/components/SubscriptionModal.tsx` | KBZPay QR, plan selector, file/webcam receipt capture, and submission history |
 | `src/components/AdminDashboardModal.tsx` | Server-side paginated Admin Dashboard (Users, KBZPay Payments, AI Keys & Models) |
 | `src/components/Modals.tsx` | Shortcuts cheat sheet, Image picker, LLM Subtree paste modal, Lightbox |
 | `src/hooks/useAccount.ts` | Firebase/dev auth state sync with `/api/auth/me` and per-user storage scoping |
-| `src/utils/firebaseClient.ts` | Firebase Web SDK auth helpers (Email, Google, Facebook, password reset, verification) |
+| `src/utils/firebaseClient.ts` | Firebase Web SDK auth helpers (Email, Google, password reset, verification) |
 | `src/utils/accountApi.ts` | Authenticated JSON/blob client for `/api/auth/*`, `/api/ai/byok`, `/api/billing/*`, `/api/admin/*` |
 | `src/utils/deviceFingerprint.ts` | Persistent IndexedDB device token + SHA-256 browser fingerprint generator |
 | `src/utils/layoutEngine.ts` | Radial, right-tree, and org-chart positioning + connector/cross-link path math |
