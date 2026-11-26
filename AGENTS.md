@@ -75,6 +75,16 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
   - Native selects (`.mf-select`, `.mf-map-select`) use `appearance: none` with a custom SVG chevron at `background-position: right 10px center` and `padding-right: 30px`.
   - Lucide Chevron icons inside buttons get `margin-right: 4px`.
 
+### 2.6 Multi-User Auth, MongoDB Atlas, BYOK Security, KBZPay & Admin Dashboard
+- **Auth & Cloud Storage:** Firebase Auth (free Spark, project `lazy-mindmap`, Email/Password + Google + Facebook) paired with MongoDB Atlas (`MONGODB_URI`, free M0 tier) via `server/mongoDb.mjs` (falls back to Cloud Firestore or local `data/db/` JSON in `server/db.mjs`). `FIREBASE_PROJECT_ID=lazy-mindmap` suffices on the server to verify Firebase ID tokens when using MongoDB.
+- **Free Forever Core:** Mind mapping and exports are 100% free. Guests store maps locally in IndexedDB; signed-in users get free per-user cloud sync (`/api/maps` scoped by `uid`) + user-scoped IndexedDB databases (`lazymindmap_db_<uid>`).
+- **AI Access Modes (`POST /api/llm/chat`):**
+  - **Free Trial (`trial`):** 3 tries for verified non-guest accounts using server-side `GEMINI_TRIAL_API_KEY` (default `gemini-3.1-flash-lite`), protected against multi-account abuse via normalized Gmail/alias email hashes, disposable-domain rejection, SHA-256 device fingerprint (`X-Device-Fingerprint`), signed `HttpOnly` `lm_device_id` cookie, and hashed IP/geo windows (`trial_ledger`).
+  - **Managed Pro (`managed`):** Activated via KBZPay (`src/assets/kbzpay_qr.jpg`, SHA-256 verified, payee `Arkar Chan Myae (*******4519)`, `1,000 MMK/mo` & `10,000 MMK/yr`, `150 msgs/mo` & `15/day` fair-use cap). Duplicate Transaction IDs return `409`; receipt binaries are stored in MongoDB `payment_receipts` (`mongo:<paymentId>`, 180-day TTL).
+  - **Hybrid BYOK (`byok_vault` / `byok_session`):** Users choose **Encrypted Cloud Vault** (AES-256-GCM on server with AAD `byok:<uid>`, only masked hints returned) OR **Session-Only (RAM)** (`X-BYOK-Key` header, wiped on tab close/sign-out). Plaintext `apiKey` is **never** written to `localStorage`, and `custom` `baseUrl` is SSRF-checked (`validateExternalBaseUrl`).
+- **Admin Dashboard:** Restricted to `role === "admin"` / `ADMIN_EMAILS`. Provides server-side paginated Users & KBZPay Payments tables, private receipt preview (`/api/admin/receipts/:id`), and encrypted AI key/model/quota configuration.
+- **Credentials Hygiene:** `.gitignore` ignores `*.env` and `atlas-credentials.env` while keeping `!.env.example` tracked.
+
 ---
 
 ## 3. Key Files Map
@@ -82,23 +92,36 @@ Defined in `src/types/mindmap.ts` (`"contrast" | "colorful" | "custom"`):
 | File | Responsibility |
 | :--- | :--- |
 | `src/App.tsx` | Application state, auto-save loop, undo/redo, pan/zoom, SVG layers, modal & toolbar wiring |
-| `src/types/mindmap.ts` | Core TypeScript types (`MindMapDocument`, `MindMapNode`, `CrossLink`, `ColorMode`, `SaveState`) |
-| `src/components/TopToolbar.tsx` | Minimal navbar, save status pill, and top-right categorized hamburger menu |
+| `src/types/mindmap.ts` | Core TypeScript types (`MindMapDocument`, `MindMapNode`, `CrossLink`, `ColorMode`, `SaveState`, Auth/Billing/Admin types) |
+| `src/components/TopToolbar.tsx` | Minimal navbar, save status pill, Account/Sign-In pill, and top-right categorized hamburger menu |
 | `src/components/FloatingNodeToolbar.tsx` | Contextual floating bar for selected node(s) |
 | `src/components/FloatingCrossLinkToolbar.tsx` | Contextual floating bar for a single selected cross-link |
 | `src/components/MindMapNodeCard.tsx` | Rich node card rendering, inline Markdown editor, resize handles, photo actions |
 | `src/components/NodeSideDrawer.tsx` | `A` shortcut side inspector for extended notes and file attachments |
-| `src/components/LlmAssistantDrawer.tsx` | Bottom-right circular FAB + sliding right AI chatbox with history, API key settings, and universal file uploads |
+| `src/components/LlmAssistantDrawer.tsx` | Bottom-right circular FAB + sliding AI chatbox with Managed/BYOK mode tabs, Encrypted Vault/RAM selector, and file uploads |
+| `src/components/AuthModal.tsx` | Email/Google/Facebook sign-in/sign-up/reset & verified account profile modal |
+| `src/components/SubscriptionModal.tsx` | KBZPay QR, plan selector, file/webcam receipt capture, and submission history |
+| `src/components/AdminDashboardModal.tsx` | Server-side paginated Admin Dashboard (Users, KBZPay Payments, AI Keys & Models) |
 | `src/components/Modals.tsx` | Shortcuts cheat sheet, Image picker, LLM Subtree paste modal, Lightbox |
+| `src/hooks/useAccount.ts` | Firebase/dev auth state sync with `/api/auth/me` and per-user storage scoping |
+| `src/utils/firebaseClient.ts` | Firebase Web SDK auth helpers (Email, Google, Facebook, password reset, verification) |
+| `src/utils/accountApi.ts` | Authenticated JSON/blob client for `/api/auth/*`, `/api/ai/byok`, `/api/billing/*`, `/api/admin/*` |
+| `src/utils/deviceFingerprint.ts` | Persistent IndexedDB device token + SHA-256 browser fingerprint generator |
 | `src/utils/layoutEngine.ts` | Radial, right-tree, and org-chart positioning + connector/cross-link path math |
 | `src/utils/llmMathNormalizer.ts` | Universal LLM KaTeX/Markdown/code/Mermaid/task-list HTML renderer and clipboard extractor |
 | `src/utils/llmMindMapAgent.ts` | LLM prompt/context builder, related node matcher, JSON/Markdown operation applier, and API client |
 | `src/utils/treeOps.ts` | Pure immutable document/tree mutation helpers |
-| `src/utils/storage.ts` | Dual persistence (`IndexedDB`/`localStorage` + `/api/maps` & `/api/uploads`) |
+| `src/utils/storage.ts` | Dual persistence (user-scoped `IndexedDB`/`localStorage` + `/api/maps` & `/api/uploads`) |
 | `src/utils/themes.ts` | Theme palettes, color swatches, font presets, contrast foreground helper |
 | `src/utils/exporters.ts` | Export/import for JSON, Markdown, MindMup `.mup`, FreeMind `.mm`, SVG, PNG |
-| `server/api.mjs` | Backend REST middleware for `/api/maps`, `/api/uploads`, `/api/llm/chat`, `/api/health` |
-| `src/__tests__/lazymindmap.test.ts` | Vitest unit test suite |
+| `server/api.mjs` | Backend REST middleware for maps, uploads, auth, BYOK vault, trials, KBZPay billing, LLM proxy, and admin APIs |
+| `server/db.mjs` | Unified DB router (`MONGODB_URI` → MongoDB Atlas, Firebase Admin → Firestore, else local `data/db/`) |
+| `server/mongoDb.mjs` | MongoDB Atlas adapter (users, maps, BYOK vault, trials, payments, `payment_receipts` TTL binary storage, pagination) |
+| `server/auth.mjs` | Firebase ID token verification, proxy IP/geo extraction, and signed `HttpOnly` device cookie checks |
+| `server/crypto.mjs` | AES-256-GCM encryption with AAD, key masking, HMAC hashing, email normalization, and SSRF validation |
+| `server/env.mjs` | Zero-dependency `.env` / `.env.local` loader |
+| `src/__tests__/lazymindmap.test.ts` | Core Vitest unit test suite |
+| `src/__tests__/authBillingAdmin.test.ts` | Security, encryption, SSRF, anti-abuse, KBZPay, admin pagination & MongoDB adapter tests |
 
 ---
 
