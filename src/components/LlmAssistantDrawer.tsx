@@ -8,16 +8,19 @@ import {
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   AlertCircle,
   Check,
   ChevronDown,
   ChevronRight,
+  Cpu,
   Crown,
   Eye,
   EyeOff,
   FileText,
+  GripVertical,
   History,
   KeyRound,
   Loader2,
@@ -111,6 +114,34 @@ function formatDateTime(iso: string): string {
   }
 }
 
+const DRAWER_WIDTH_STORAGE_KEY = "lazymindmap_llm_drawer_width";
+const DEFAULT_DRAWER_WIDTH = 440;
+const WIDE_DRAWER_WIDTH = 680;
+const MIN_DRAWER_WIDTH = 340;
+const MAX_DRAWER_WIDTH = 920;
+
+function getMaxDrawerWidth(): number {
+  if (typeof window === "undefined") return MAX_DRAWER_WIDTH;
+  return Math.min(MAX_DRAWER_WIDTH, Math.max(MIN_DRAWER_WIDTH, window.innerWidth - 48));
+}
+
+function clampDrawerWidth(width: number): number {
+  return Math.round(Math.min(getMaxDrawerWidth(), Math.max(MIN_DRAWER_WIDTH, width)));
+}
+
+function loadSavedDrawerWidth(): number {
+  try {
+    const raw = localStorage.getItem(DRAWER_WIDTH_STORAGE_KEY);
+    if (raw) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return clampDrawerWidth(parsed);
+      }
+    }
+  } catch {}
+  return DEFAULT_DRAWER_WIDTH;
+}
+
 function actionLabel(action: LlmNodeChangeRecord["action"]): string {
   switch (action) {
     case "modified":
@@ -162,6 +193,8 @@ export function LlmAssistantDrawer({
   const [dragActive, setDragActive] = useState(false);
   const [expandedRawErrors, setExpandedRawErrors] = useState<Record<string, boolean>>({});
   const [errorCodes, setErrorCodes] = useState<Record<string, string>>({});
+  const [drawerWidth, setDrawerWidth] = useState<number>(() => loadSavedDrawerWidth());
+  const [isResizing, setIsResizing] = useState(false);
 
   const drawerId = useId();
   const inputId = useId();
@@ -222,27 +255,104 @@ export function LlmAssistantDrawer({
     );
   }, [effectiveRunMode, config.apiKey, account]);
 
-  const headerModeLabel = useMemo(() => {
+  const { activeModelName, activeModeBadge } = useMemo(() => {
     if (effectiveRunMode === "byok_session") {
-      return `BYOK RAM · ${LLM_PROVIDER_META[config.provider].label}`;
+      return {
+        activeModelName:
+          config.model.trim() || LLM_PROVIDER_META[config.provider].defaultModel,
+        activeModeBadge: `BYOK RAM · ${LLM_PROVIDER_META[config.provider].label}`,
+      };
     }
     if (effectiveRunMode === "byok_vault") {
       const p = account.byok?.provider || config.provider;
-      return `BYOK Vault · ${LLM_PROVIDER_META[p].label}`;
+      return {
+        activeModelName:
+          account.byok?.model ||
+          config.model.trim() ||
+          LLM_PROVIDER_META[p].defaultModel,
+        activeModeBadge: `BYOK Vault · ${LLM_PROVIDER_META[p].label}`,
+      };
     }
     if (effectiveRunMode === "managed") {
-      return account.isAdmin
-        ? `Admin · Unlimited · ${account.billing.managedModel}`
-        : `Pro · ${account.billing.managedModel}`;
+      return {
+        activeModelName: account.billing.managedModel,
+        activeModeBadge: account.isAdmin ? "Admin · Unlimited" : "Pro",
+      };
     }
-    if (!account.authenticated) {
-      return `Trial (${account.billing.maxTrialCount} Free)`;
+    return {
+      activeModelName: account.billing.trialModel,
+      activeModeBadge: !account.authenticated
+        ? `Trial (${account.billing.maxTrialCount} Free)`
+        : account.isAdmin
+        ? "Admin · Unlimited"
+        : `Trial (${account.trial?.remaining ?? 0}/${account.billing.maxTrialCount})`,
+    };
+  }, [effectiveRunMode, config.provider, config.model, account]);
+
+  useEffect(() => {
+    if (isResizing) return;
+    try {
+      localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY, String(drawerWidth));
+    } catch {}
+  }, [drawerWidth, isResizing]);
+
+  useEffect(() => {
+    const onWindowResize = () => {
+      setDrawerWidth((prev) => clampDrawerWidth(prev));
+    };
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  }, []);
+
+  const handleResizePointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = drawerWidth;
+    setIsResizing(true);
+    const prevCursor = document.body.style.cursor;
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (ev: PointerEvent) => {
+      setDrawerWidth(clampDrawerWidth(startWidth + (startX - ev.clientX)));
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevUserSelect;
+      setIsResizing(false);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
+  };
+
+  const handleResizeDoubleClick = () => {
+    const wide = clampDrawerWidth(WIDE_DRAWER_WIDTH);
+    const next = Math.abs(drawerWidth - DEFAULT_DRAWER_WIDTH) < 40 ? wide : DEFAULT_DRAWER_WIDTH;
+    setDrawerWidth(next);
+    onAnnounce(`AI panel width set to ${next}px`);
+  };
+
+  const handleResizeKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setDrawerWidth((w) => clampDrawerWidth(w + 32));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setDrawerWidth((w) => clampDrawerWidth(w - 32));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setDrawerWidth(DEFAULT_DRAWER_WIDTH);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setDrawerWidth(clampDrawerWidth(WIDE_DRAWER_WIDTH));
     }
-    if (account.isAdmin) {
-      return `Admin · Unlimited`;
-    }
-    return `Trial (${account.trial?.remaining ?? 0}/${account.billing.maxTrialCount})`;
-  }, [effectiveRunMode, config.provider, account]);
+  };
 
   // Wipe in-memory session key if user signs out so keys never leak across sessions
   const prevUidRef = useRef<string | null>(account.user?.uid || null);
@@ -744,7 +854,10 @@ export function LlmAssistantDrawer({
       {/* Right-side Sliding Chatbox Section */}
       <aside
         id={drawerId}
-        className={`mf-llm-drawer ${open ? "is-open" : ""} ${dragActive ? "is-drag-over" : ""}`}
+        className={`mf-llm-drawer ${open ? "is-open" : ""} ${dragActive ? "is-drag-over" : ""} ${
+          isResizing ? "is-resizing" : ""
+        }`}
+        style={{ width: `min(${drawerWidth}px, calc(100vw - 20px))` }}
         aria-label="AI Mind Map Assistant Chat"
         aria-hidden={!open}
         {...(!open ? ({ inert: "" } as Record<string, string>) : {})}
@@ -758,11 +871,30 @@ export function LlmAssistantDrawer({
         onDrop={(e) => void handleDrop(e)}
         onMouseDown={(e) => e.stopPropagation()}
       >
+        <button
+          type="button"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Slide to resize AI Assistant panel"
+          aria-valuemin={MIN_DRAWER_WIDTH}
+          aria-valuemax={getMaxDrawerWidth()}
+          aria-valuenow={Math.round(drawerWidth)}
+          title="Drag to resize AI panel · Double-click to toggle wide view"
+          className={`mf-llm-resize-handle ${isResizing ? "is-resizing" : ""}`}
+          onPointerDown={handleResizePointerDown}
+          onDoubleClick={handleResizeDoubleClick}
+          onKeyDown={handleResizeKeyDown}
+        >
+          <span className="mf-llm-resize-pill" aria-hidden="true">
+            <GripVertical size={14} />
+          </span>
+        </button>
+
+        <div className="mf-llm-drawer-inner">
         <header className="mf-llm-drawer-header">
           <div className="mf-llm-drawer-title">
-            <Sparkles size={16} aria-hidden="true" />
+            <Sparkles size={17} aria-hidden="true" />
             <span>AI Assistant</span>
-            <span className="mf-llm-provider-pill">{headerModeLabel}</span>
           </div>
 
           <div className="mf-llm-header-actions">
@@ -773,7 +905,7 @@ export function LlmAssistantDrawer({
               aria-label="Start New Conversation"
               onClick={handleNewConversation}
             >
-              <MessageSquarePlus size={15} aria-hidden="true" />
+              <MessageSquarePlus size={16} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -783,7 +915,7 @@ export function LlmAssistantDrawer({
               aria-label="Conversations History"
               onClick={() => setHistoryViewOpen((v) => !v)}
             >
-              <History size={15} aria-hidden="true" />
+              <History size={16} aria-hidden="true" />
               <span className="mf-llm-badge-count">{conversations.length}</span>
             </button>
             <button
@@ -794,7 +926,7 @@ export function LlmAssistantDrawer({
               aria-label="AI Plan &amp; BYOK Key Settings"
               onClick={() => setSettingsOpen((v) => !v)}
             >
-              <KeyRound size={15} aria-hidden="true" />
+              <KeyRound size={16} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -818,7 +950,7 @@ export function LlmAssistantDrawer({
               className={`mf-chip-btn ${!isUsingByok ? "is-active" : ""}`}
               onClick={() => handleSwitchMode("managed")}
             >
-              <Crown size={12} aria-hidden="true" /> Managed AI
+              <Crown size={14} aria-hidden="true" /> Managed AI
             </button>
             <button
               type="button"
@@ -827,19 +959,19 @@ export function LlmAssistantDrawer({
               className={`mf-chip-btn ${isUsingByok ? "is-active" : ""}`}
               onClick={() => handleSwitchMode("byok")}
             >
-              <KeyRound size={12} aria-hidden="true" /> BYOK (Free)
+              <KeyRound size={14} aria-hidden="true" /> BYOK (Free)
             </button>
           </div>
 
           {!isUsingByok ? (
             !account.authenticated ? (
               <button type="button" className="mf-chip-btn" onClick={onOpenAuth}>
-                <UserCheck size={12} aria-hidden="true" /> Sign in for {account.billing.maxTrialCount} Free Tries
+                <UserCheck size={14} aria-hidden="true" /> Sign in for {account.billing.maxTrialCount} Free Tries
               </button>
             ) : isProActive ? (
               account.isAdmin ? (
                 <button type="button" className="mf-chip-btn" onClick={() => setSettingsOpen((o) => !o)}>
-                  <ShieldCheck size={12} aria-hidden="true" /> Unlimited · Admin
+                  <ShieldCheck size={14} aria-hidden="true" /> Unlimited · Admin
                 </button>
               ) : (
                 <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
@@ -848,7 +980,7 @@ export function LlmAssistantDrawer({
               )
             ) : (
               <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
-                <Crown size={12} aria-hidden="true" />{" "}
+                <Crown size={14} aria-hidden="true" />{" "}
                 {(account.trial?.remaining ?? 0) > 0
                   ? `${account.trial?.remaining} tries left · Upgrade`
                   : "Upgrade (1,000 MMK/mo)"}
@@ -860,7 +992,7 @@ export function LlmAssistantDrawer({
               className="mf-chip-btn"
               onClick={() => setSettingsOpen((o) => !o)}
             >
-              <ShieldCheck size={12} aria-hidden="true" />{" "}
+              <ShieldCheck size={14} aria-hidden="true" />{" "}
               {effectiveRunMode === "byok_vault"
                 ? account.byok?.configured
                   ? `Vault ${account.byok.keyHint || "Ready"}`
@@ -1500,7 +1632,7 @@ export function LlmAssistantDrawer({
           </div>
 
           <div className="mf-llm-composer-actions">
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1522,9 +1654,9 @@ export function LlmAssistantDrawer({
                 disabled={uploadingFiles}
               >
                 {uploadingFiles ? (
-                  <Loader2 size={13} className="mf-spin" aria-hidden="true" />
+                  <Loader2 size={14} className="mf-spin" aria-hidden="true" />
                 ) : (
-                  <Paperclip size={13} aria-hidden="true" />
+                  <Paperclip size={14} aria-hidden="true" />
                 )}
                 <span>Upload File</span>
               </button>
@@ -1548,14 +1680,33 @@ export function LlmAssistantDrawer({
               }
             >
               {sending ? (
-                <Loader2 size={14} className="mf-spin" aria-hidden="true" />
+                <Loader2 size={15} className="mf-spin" aria-hidden="true" />
               ) : (
-                <Send size={14} aria-hidden="true" />
+                <Send size={15} aria-hidden="true" />
               )}
               <span>{sending ? "Applying…" : "Send"}</span>
             </button>
           </div>
+
+          <div className="mf-llm-composer-footer">
+            <button
+              type="button"
+              className={`mf-llm-model-btn ${settingsOpen ? "is-active" : ""}`}
+              aria-expanded={settingsOpen}
+              title="Active LLM model — click to open AI Plan & Model Settings"
+              onClick={() => setSettingsOpen((o) => !o)}
+            >
+              <Cpu size={14} aria-hidden="true" />
+              <span className="mf-llm-model-name">{activeModelName}</span>
+              <span className="mf-llm-model-sep" aria-hidden="true">
+                ·
+              </span>
+              <span className="mf-llm-model-mode">{activeModeBadge}</span>
+              <ChevronDown size={13} aria-hidden="true" />
+            </button>
+          </div>
         </form>
+        </div>
       </aside>
     </>
   );

@@ -524,7 +524,7 @@ dialog.mf-dialog::backdrop {
   min-block-size: 34px;
   padding: 5px 11px;
   font-size: 0.85rem;
-  border-radius: 7px;
+  border-radius: 8px;
 }
 
 .mf-bottom-hud .mf-btn {
@@ -539,20 +539,36 @@ dialog.mf-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-inline-size: 30px;
-  min-block-size: 30px;
-  padding: 4px 9px;
-  border-radius: 7px;
+  gap: 7px;
+  min-inline-size: 38px;
+  min-block-size: 38px;
+  padding: 8px 14px;
+  border-radius: 9px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: 0.875rem;
   font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.25;
   cursor: pointer;
   transition: background-color var(--dur-1) var(--ease-spring),
     border-color var(--dur-1) var(--ease-spring),
-    color var(--dur-1) var(--ease-spring);
+    color var(--dur-1) var(--ease-spring),
+    box-shadow var(--dur-1) var(--ease-spring),
+    transform var(--dur-1) var(--ease-spring);
+}
+
+.mf-btn svg,
+.mf-chip-btn svg,
+.mf-menu-item-btn svg {
+  flex-shrink: 0;
+}
+
+.mf-btn:active:not([aria-disabled="true"]):not(:disabled),
+.mf-chip-btn:active:not([aria-disabled="true"]):not(:disabled),
+.mf-menu-item-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
 }
 
 .mf-btn:focus-visible,
@@ -584,6 +600,7 @@ dialog.mf-dialog::backdrop {
   background: var(--accent-color);
   color: var(--on-accent);
   border-color: var(--accent-color);
+  box-shadow: 0 1px 2px var(--shadow-ink), inset 0 1px 0 rgb(255 255 255 / 0.16);
 }
 
 @media (hover: hover) {
@@ -591,6 +608,7 @@ dialog.mf-dialog::backdrop {
     background: color-mix(in srgb, var(--accent-color) 88%, var(--text-primary));
     border-color: color-mix(in srgb, var(--accent-color) 88%, var(--text-primary));
     color: var(--on-accent);
+    box-shadow: 0 2px 6px var(--shadow-ink), inset 0 1px 0 rgb(255 255 255 / 0.16);
   }
 }
 
@@ -734,6 +752,11 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-hamburger-btn {
+  min-inline-size: 34px;
+  min-block-size: 34px;
+  padding: 5px 11px;
+  font-size: 0.85rem;
+  border-radius: 8px;
   border: 1px solid var(--border-color);
   background: var(--bg-elevated);
   font-weight: 600;
@@ -749,7 +772,7 @@ button svg[class*="lucide-chevron"] {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: min(370px, calc(100vw - 24px));
+  width: min(420px, calc(100vw - 24px));
   max-height: min(78vh, calc(100vh - 100px));
   background: var(--bg-raised);
   color: var(--text-primary);
@@ -773,21 +796,21 @@ button svg[class*="lucide-chevron"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
 }
 
 .mf-menu-title {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font-size: 0.88rem;
+  gap: 8px;
+  font-size: 0.92rem;
   font-weight: 700;
 }
 
 .mf-menu-tabs {
   display: flex;
-  gap: 4px;
+  gap: 5px;
   padding: 6px 12px;
   background: var(--bg-inset);
   border-bottom: 1px solid var(--border-color);
@@ -795,24 +818,26 @@ button svg[class*="lucide-chevron"] {
 
 .mf-menu-tab {
   flex: 1;
+  min-block-size: 36px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  border-radius: var(--r-sm);
-  padding: 5px 6px;
-  font-size: 0.75rem;
+  border-radius: var(--r-md);
+  padding: 7px 10px;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   transition: background-color var(--dur-1) var(--ease-spring),
     color var(--dur-1) var(--ease-spring),
-    border-color var(--dur-1) var(--ease-spring);
+    border-color var(--dur-1) var(--ease-spring),
+    box-shadow var(--dur-1) var(--ease-spring);
 }
 
 .mf-menu-tab.is-active {
   background: var(--bg-raised);
   color: var(--text-primary);
   border-color: var(--border-color);
-  box-shadow: inset 0 -2px 0 var(--accent-color);
+  box-shadow: inset 0 -2px 0 var(--accent-color), var(--shadow-1);
 }
 
 .mf-menu-body {
@@ -826,7 +851,7 @@ button svg[class*="lucide-chevron"] {
 .mf-menu-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-color);
 }
@@ -860,35 +885,47 @@ button svg[class*="lucide-chevron"] {
 .mf-menu-btn-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 
 .mf-menu-item-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 9px;
-  border-radius: 7px;
+  gap: 8px;
+  min-block-size: 40px;
+  padding: 9px 12px;
+  border-radius: 9px;
   border: 1px solid var(--border-color);
   background: var(--bg-surface);
   color: var(--text-primary);
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   font-weight: 500;
+  letter-spacing: -0.005em;
   cursor: pointer;
   text-align: left;
+  box-shadow: var(--shadow-1);
   transition: border-color var(--dur-1) var(--ease-spring),
-    background-color var(--dur-1) var(--ease-spring);
+    background-color var(--dur-1) var(--ease-spring),
+    box-shadow var(--dur-1) var(--ease-spring),
+    transform var(--dur-1) var(--ease-spring);
 }
 
 @media (hover: hover) {
   .mf-menu-item-btn:hover {
-    border-color: var(--accent-line);
-    background: var(--accent-soft);
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
   }
 }
 
 .mf-menu-item-btn.is-danger {
   color: var(--danger);
+}
+
+@media (hover: hover) {
+  .mf-menu-item-btn.is-danger:hover {
+    border-color: color-mix(in srgb, var(--danger) 48%, var(--border-color));
+    background: var(--danger-soft);
+  }
 }
 
 .mf-menu-kbd {
@@ -917,7 +954,7 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-menu-label {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
 }
 
@@ -925,7 +962,7 @@ button svg[class*="lucide-chevron"] {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.75rem;
+  font-size: 0.76rem;
   font-weight: 600;
   color: var(--text-muted);
   margin-top: 2px;
@@ -934,13 +971,13 @@ button svg[class*="lucide-chevron"] {
 .mf-menu-chip-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 7px;
 }
 
 .mf-preview-chip-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 7px;
 }
 
 .mf-preview-chip-grid-2 {
@@ -960,16 +997,16 @@ button svg[class*="lucide-chevron"] {
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 8px 6px;
-  border-radius: var(--r-md);
+  gap: 7px;
+  padding: 10px 8px;
+  border-radius: 9px;
   text-align: center;
 }
 
 .mf-preview-chip-label {
-  font-size: 0.71rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  line-height: 1.15;
+  line-height: 1.2;
 }
 
 .mf-option-preview-svg {
@@ -1665,21 +1702,47 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-block-size: 36px;
   border: 1px solid var(--border-color);
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   color: var(--text-primary);
-  border-radius: var(--r-sm);
-  padding: 3px 7px;
-  font-size: 0.72rem;
+  border-radius: var(--r-md);
+  padding: 7px 13px;
+  font-size: 0.83rem;
   font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
   cursor: pointer;
+  box-shadow: var(--shadow-1);
   transition: border-color var(--dur-1) var(--ease-spring),
     background-color var(--dur-1) var(--ease-spring),
-    color var(--dur-1) var(--ease-spring);
+    color var(--dur-1) var(--ease-spring),
+    box-shadow var(--dur-1) var(--ease-spring),
+    transform var(--dur-1) var(--ease-spring);
 }
 
 .mf-chip-btn:hover {
   border-color: var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+.mf-editor-quickbar .mf-chip-btn {
+  min-block-size: 30px;
+  padding: 4px 9px;
+  font-size: 0.76rem;
+  border-radius: var(--r-sm);
+}
+
+.mf-node-meta-row .mf-chip-btn {
+  min-block-size: 22px;
+  padding: 2px 7px;
+  font-size: 0.7rem;
+  border-radius: var(--r-sm);
+  box-shadow: none;
 }
 
 .mf-inline-textarea {
@@ -1828,9 +1891,9 @@ button svg[class*="lucide-chevron"] {
 
 .mf-side-drawer .mf-chip-btn,
 .mf-side-drawer .mf-btn {
-  min-block-size: 34px;
-  padding: 6px 11px;
-  font-size: 0.82rem;
+  min-block-size: 38px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
 }
 
 /* Bottom HUD */
@@ -2369,8 +2432,8 @@ button svg[class*="lucide-chevron"] {
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 12px;
-  min-width: 260px;
-  max-width: min(360px, 92vw);
+  min-width: 280px;
+  max-width: min(390px, 92vw);
   box-shadow: var(--shadow-3);
 }
 
@@ -2436,6 +2499,15 @@ button svg[class*="lucide-chevron"] {
   background: var(--text-primary);
   color: var(--bg-surface);
   border-color: var(--text-primary);
+  box-shadow: var(--shadow-1);
+}
+
+@media (hover: hover) {
+  .mf-chip-btn.is-active:hover {
+    background: var(--text-primary);
+    color: var(--bg-surface);
+    border-color: var(--text-primary);
+  }
 }
 
 .mf-ctx-danger-btn {
@@ -2480,9 +2552,13 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-crosslink-mode-banner .mf-chip-btn {
+  min-block-size: 30px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
   background: rgb(255 255 255 / 0.14);
   color: #ffffff;
   border-color: rgb(255 255 255 / 0.22);
+  box-shadow: none;
   flex-shrink: 0;
 }
 
@@ -2582,7 +2658,7 @@ button svg[class*="lucide-chevron"] {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(430px, 94vw);
+  width: min(440px, calc(100vw - 20px));
   background: var(--bg-surface);
   color: var(--text-primary);
   border-left: 1px solid var(--border-color);
@@ -2590,8 +2666,8 @@ button svg[class*="lucide-chevron"] {
   display: flex;
   flex-direction: column;
   z-index: 44;
-  overflow: hidden;
-  transform: translateX(102%);
+  overflow: visible;
+  transform: translateX(calc(100% + 24px));
   visibility: hidden;
   pointer-events: none;
 }
@@ -2602,9 +2678,89 @@ button svg[class*="lucide-chevron"] {
   pointer-events: auto;
 }
 
+.mf-llm-drawer.is-resizing {
+  transition: none !important;
+}
+
 .mf-llm-drawer.is-drag-over {
   outline: 2px dashed var(--accent-color);
   outline-offset: -6px;
+}
+
+.mf-llm-drawer-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: inherit;
+}
+
+.mf-llm-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -12px;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  touch-action: none;
+}
+
+.mf-llm-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  background: transparent;
+  transition: background-color var(--dur-1) var(--ease-spring);
+}
+
+.mf-llm-resize-handle:hover::after,
+.mf-llm-resize-handle.is-resizing::after,
+.mf-llm-resize-handle:focus-visible::after {
+  background: var(--accent-color);
+}
+
+.mf-llm-resize-handle:focus-visible {
+  outline: none;
+}
+
+.mf-llm-resize-pill {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 48px;
+  border-radius: var(--r-pill);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-2);
+  transition: background-color var(--dur-1) var(--ease-spring),
+    border-color var(--dur-1) var(--ease-spring),
+    color var(--dur-1) var(--ease-spring),
+    box-shadow var(--dur-1) var(--ease-spring);
+}
+
+.mf-llm-resize-handle:hover .mf-llm-resize-pill,
+.mf-llm-resize-handle.is-resizing .mf-llm-resize-pill,
+.mf-llm-resize-handle:focus-visible .mf-llm-resize-pill {
+  background: var(--bg-surface);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-2);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -2621,7 +2777,7 @@ button svg[class*="lucide-chevron"] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-surface);
 }
@@ -2629,9 +2785,9 @@ button svg[class*="lucide-chevron"] {
 .mf-llm-drawer-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: 1.3rem;
   font-weight: 400;
   line-height: 1.15;
   min-width: 0;
@@ -2643,21 +2799,16 @@ button svg[class*="lucide-chevron"] {
   text-overflow: ellipsis;
 }
 
-.mf-llm-provider-pill {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  font-weight: 500;
-  padding: 2px 7px;
-  border-radius: var(--r-pill);
-  background: var(--accent-soft);
-  color: var(--accent-color);
-  white-space: nowrap;
-}
-
 .mf-llm-header-actions {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
+}
+
+.mf-llm-header-actions .mf-btn {
+  min-inline-size: 38px;
+  min-block-size: 38px;
+  padding: 7px 10px;
 }
 
 .mf-llm-header-actions .mf-btn.is-active {
@@ -2795,7 +2946,7 @@ button svg[class*="lucide-chevron"] {
 .mf-llm-drawer .mf-chip-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .mf-llm-conv-banner {
@@ -2909,7 +3060,9 @@ button svg[class*="lucide-chevron"] {
 
 .mf-llm-conv-delete {
   align-self: center;
-  margin-right: 4px;
+  margin-right: 6px;
+  min-inline-size: 36px;
+  min-block-size: 36px;
   color: var(--text-muted);
 }
 
@@ -3110,18 +3263,23 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-llm-node-chip {
+  min-block-size: 32px;
   border: 1px solid var(--border-color);
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-radius: var(--r-sm);
-  padding: 3px 7px;
-  font-size: 0.72rem;
+  border-radius: var(--r-md);
+  padding: 5px 11px;
+  font-size: 0.78rem;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-1) var(--ease-spring),
+    background-color var(--dur-1) var(--ease-spring);
 }
 
 .mf-llm-node-chip:hover {
@@ -3227,17 +3385,23 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-llm-target-chip {
+  min-block-size: 30px;
   border: 1px solid var(--border-color);
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   color: var(--text-primary);
   border-radius: var(--r-pill);
-  padding: 1px 7px;
-  font-size: 0.69rem;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  font-weight: 500;
   cursor: pointer;
-  max-width: 170px;
+  max-width: 185px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-1) var(--ease-spring),
+    color var(--dur-1) var(--ease-spring),
+    background-color var(--dur-1) var(--ease-spring);
 }
 
 .mf-llm-target-chip:hover {
@@ -3307,15 +3471,79 @@ button svg[class*="lucide-chevron"] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .mf-llm-send-btn {
-  padding: 5px 12px;
+  min-block-size: 38px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+}
+
+.mf-llm-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.mf-llm-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-block-size: 34px;
+  padding: 6px 11px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 0.79rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-spring),
+    background-color var(--dur-1) var(--ease-spring),
+    color var(--dur-1) var(--ease-spring);
+}
+
+@media (hover: hover) {
+  .mf-llm-model-btn:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
+  }
+}
+
+.mf-llm-model-btn.is-active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.mf-llm-model-name {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mf-llm-model-sep {
+  color: var(--border-strong);
+}
+
+.mf-llm-model-mode {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 
 /* Account, Auth, KBZPay Subscription, AI Modes & Admin Dashboard */
 .mf-account-pill {
+  min-inline-size: 32px;
+  min-block-size: 32px;
   border: 1px solid var(--border-color);
   background: var(--bg-elevated);
   border-radius: var(--r-pill);
@@ -3386,17 +3614,37 @@ button svg[class*="lucide-chevron"] {
 
 .mf-btn-outline {
   border: 1px solid var(--border-color);
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-1);
+}
+
+@media (hover: hover) {
+  .mf-btn-outline:hover:not([aria-disabled="true"]):not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
+  }
 }
 
 .mf-link-btn {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 34px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--accent-color);
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   font-weight: 600;
-  padding: 2px 0;
+  padding: 6px 10px;
   cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-spring), color var(--dur-1) var(--ease-spring);
+}
+
+@media (hover: hover) {
+  .mf-link-btn:hover {
+    background: var(--accent-soft);
+  }
 }
 
 .mf-help-text {
@@ -3499,8 +3747,8 @@ button svg[class*="lucide-chevron"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-elevated);
   flex-wrap: wrap;
@@ -3510,8 +3758,8 @@ button svg[class*="lucide-chevron"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px;
-  border-radius: var(--r-md);
+  padding: 4px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
   background: var(--bg-inset);
 }
@@ -3612,11 +3860,15 @@ button svg[class*="lucide-chevron"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 10px;
+  min-block-size: 44px;
   border: 1px solid var(--border-color);
+  border-radius: 10px;
   background: var(--bg-surface);
-  padding: 9px 10px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
   font-weight: 600;
+  box-shadow: var(--shadow-1);
   transition: border-color var(--dur-1) var(--ease-spring),
     background-color var(--dur-1) var(--ease-spring),
     box-shadow var(--dur-1) var(--ease-spring),
@@ -3662,10 +3914,10 @@ button svg[class*="lucide-chevron"] {
 .mf-auth-tabs,
 .mf-admin-tabs {
   display: inline-flex;
-  gap: 4px;
+  gap: 5px;
   flex-wrap: wrap;
   padding: 4px;
-  border-radius: var(--r-md);
+  border-radius: 10px;
   border: 1px solid var(--border-color);
   background: var(--bg-inset);
   align-self: flex-start;
@@ -3675,8 +3927,18 @@ button svg[class*="lucide-chevron"] {
 .mf-admin-tabs .mf-chip-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 9px;
+  gap: 6px;
+  min-block-size: 38px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+}
+
+.mf-dialog .mf-btn-primary,
+.mf-dialog .mf-btn-outline {
+  min-block-size: 40px;
+  padding: 9px 16px;
+  font-size: 0.88rem;
+  border-radius: 9px;
 }
 
 .mf-auth-form {
@@ -4016,6 +4278,9 @@ button svg[class*="lucide-chevron"] {
 }
 
 .mf-kbz-qr-card .mf-chip-btn {
+  min-block-size: 34px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
   background: #f6f4ee;
   color: #1b1a17;
   border-color: #dcd7cb;
@@ -4292,7 +4557,13 @@ button svg[class*="lucide-chevron"] {
 .mf-table-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
+}
+
+.mf-table-actions .mf-chip-btn {
+  min-block-size: 34px;
+  padding: 6px 11px;
+  font-size: 0.8rem;
 }
 
 .mf-empty-cell {
