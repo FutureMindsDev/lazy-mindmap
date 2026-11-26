@@ -300,7 +300,15 @@ function resolveAdminSecretKey(aiConfig, kind) {
     }
     return String(process.env.GEMINI_MANAGED_API_KEY || "").trim();
   }
-  return String(process.env.GEMINI_MANAGED_API_KEY || "").trim();
+  const envManaged = String(process.env.GEMINI_MANAGED_API_KEY || "").trim();
+  if (envManaged) return envManaged;
+  if (aiConfig.trialApiKeyEnc) {
+    try {
+      const fallbackTrial = decryptSecret(aiConfig.trialApiKeyEnc, "admin:trial");
+      if (fallbackTrial) return fallbackTrial;
+    } catch {}
+  }
+  return String(process.env.GEMINI_TRIAL_API_KEY || "").trim();
 }
 
 function buildAdminAiConfigResponse(aiConfig) {
@@ -1387,106 +1395,112 @@ export function createApiMiddleware(
           if (auth.user.status === "suspended") {
             return sendJson(res, 403, { error: "Account is suspended." });
           }
-          if (!auth.user.emailVerified) {
-            return sendJson(
-              res,
-              403,
-              {
-                error:
-                  "Please verify your email address before using your 3 free AI trials (or use BYOK).",
-                code: "EMAIL_NOT_VERIFIED",
-              },
-              cookieHeaderObj
-            );
-          }
-          if (isDisposableEmail(auth.user.email)) {
-            return sendJson(
-              res,
-              403,
-              {
-                error:
-                  "Disposable temporary email addresses are not eligible for free AI trials. Please sign in with a permanent email or use BYOK.",
-                code: "DISPOSABLE_EMAIL",
-              },
-              cookieHeaderObj
-            );
-          }
-          if (estimateAttachmentBytes(conversation) > MAX_MANAGED_ATTACHMENT_BYTES) {
-            return sendJson(res, 413, {
-              error: "Attachments exceed the 5 MB limit for trial AI requests.",
-            });
-          }
 
           const aiConfig = await db.getAdminAiConfig();
           const maxTrials = aiConfig.maxTrialCount ?? 3;
-          const normalizedEmail = normalizeEmailForAntiAbuse(auth.user.email);
-          const normalizedEmailHash = normalizedEmail ? hmacHash(normalizedEmail, "email") : "";
-          const nowMs = Date.now();
-          const since24hIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
-          const since30dIso = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
+          let normalizedEmailHash = "";
+          let counts = null;
 
-          const counts = await db.getTrialUsageCounts({
-            uid: auth.uid,
-            normalizedEmailHash,
-            deviceFingerprintHash: signals.deviceFingerprintHash,
-            deviceCookieHash: signals.deviceCookieHash,
-            ipHash: signals.ipHash,
-            since24hIso,
-            since30dIso,
-          });
+          if (!auth.isAdmin) {
+            if (!auth.user.emailVerified) {
+              return sendJson(
+                res,
+                403,
+                {
+                  error:
+                    "Please verify your email address before using your 3 free AI trials (or use BYOK).",
+                  code: "EMAIL_NOT_VERIFIED",
+                },
+                cookieHeaderObj
+              );
+            }
+            if (isDisposableEmail(auth.user.email)) {
+              return sendJson(
+                res,
+                403,
+                {
+                  error:
+                    "Disposable temporary email addresses are not eligible for free AI trials. Please sign in with a permanent email or use BYOK.",
+                  code: "DISPOSABLE_EMAIL",
+                },
+                cookieHeaderObj
+              );
+            }
+            if (estimateAttachmentBytes(conversation) > MAX_MANAGED_ATTACHMENT_BYTES) {
+              return sendJson(res, 413, {
+                error: "Attachments exceed the 5 MB limit for trial AI requests.",
+              });
+            }
 
-          if ((auth.user.trial?.used || 0) >= maxTrials || counts.uidCount >= maxTrials) {
-            return sendJson(
-              res,
-              403,
-              {
-                error: `You have used all ${maxTrials} free AI trials. Subscribe with KBZPay (${aiConfig.monthlyPriceMmk.toLocaleString()} MMK/mo) or switch to free BYOK.`,
-                code: "TRIAL_EXHAUSTED",
-              },
-              cookieHeaderObj
-            );
-          }
+            const normalizedEmail = normalizeEmailForAntiAbuse(auth.user.email);
+            normalizedEmailHash = normalizedEmail ? hmacHash(normalizedEmail, "email") : "";
+            const nowMs = Date.now();
+            const since24hIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+            const since30dIso = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-          if (normalizedEmailHash && counts.normalizedEmailCount >= maxTrials) {
-            return sendJson(
-              res,
-              403,
-              {
-                error:
-                  "Free trial limit reached for this email address. Please subscribe or use your own BYOK key.",
-                code: "TRIAL_ABUSE_EMAIL",
-              },
-              cookieHeaderObj
-            );
-          }
+            counts = await db.getTrialUsageCounts({
+              uid: auth.uid,
+              normalizedEmailHash,
+              deviceFingerprintHash: signals.deviceFingerprintHash,
+              deviceCookieHash: signals.deviceCookieHash,
+              ipHash: signals.ipHash,
+              since24hIso,
+              since30dIso,
+            });
 
-          if (
-            (signals.deviceFingerprintHash && counts.deviceFingerprintCount >= maxTrials) ||
-            (signals.deviceCookieHash && counts.deviceCookieCount >= maxTrials)
-          ) {
-            return sendJson(
-              res,
-              403,
-              {
-                error:
-                  "Free trial limit reached on this device. Multi-account trial reuse is blocked; subscribe with KBZPay or use BYOK.",
-                code: "TRIAL_ABUSE_DEVICE",
-              },
-              cookieHeaderObj
-            );
-          }
+            if ((auth.user.trial?.used || 0) >= maxTrials || counts.uidCount >= maxTrials) {
+              return sendJson(
+                res,
+                403,
+                {
+                  error: `You have used all ${maxTrials} free AI trials. Subscribe with KBZPay (${aiConfig.monthlyPriceMmk.toLocaleString()} MMK/mo) or switch to free BYOK.`,
+                  code: "TRIAL_EXHAUSTED",
+                },
+                cookieHeaderObj
+              );
+            }
 
-          if (counts.ip24hCount >= maxTrials || counts.ip30dCount >= maxTrials * 2) {
-            return sendJson(
-              res,
-              429,
-              {
-                error:
-                  "Too many free trial requests from this network/IP. Please subscribe with KBZPay or use BYOK.",
-                code: "TRIAL_ABUSE_IP",
-              },
-              cookieHeaderObj
-            );
+            if (normalizedEmailHash && counts.normalizedEmailCount >= maxTrials) {
+              return sendJson(
+                res,
+                403,
+                {
+                  error:
+                    "Free trial limit reached for this email address. Please subscribe or use your own BYOK key.",
+                  code: "TRIAL_ABUSE_EMAIL",
+                },
+                cookieHeaderObj
+              );
+            }
+
+            if (
+              (signals.deviceFingerprintHash && counts.deviceFingerprintCount >= maxTrials) ||
+              (signals.deviceCookieHash && counts.deviceCookieCount >= maxTrials)
+            ) {
+              return sendJson(
+                res,
+                403,
+                {
+                  error:
+                    "Free trial limit reached on this device. Multi-account trial reuse is blocked; subscribe with KBZPay or use BYOK.",
+                  code: "TRIAL_ABUSE_DEVICE",
+                },
+                cookieHeaderObj
+              );
+            }
+
+            if (counts.ip24hCount >= maxTrials || counts.ip30dCount >= maxTrials * 2) {
+              return sendJson(
+                res,
+                429,
+                {
+                  error:
+                    "Too many free trial requests from this network/IP. Please subscribe with KBZPay or use BYOK.",
+                  code: "TRIAL_ABUSE_IP",
+                },
+                cookieHeaderObj
+              );
+            }
           }
 
           apiKey = resolveAdminSecretKey(aiConfig, "trial");
@@ -1521,21 +1535,25 @@ export function createApiMiddleware(
           }
 
           const nowIso = new Date().toISOString();
-          await db.recordTrialUse({
-            uid: auth.uid,
-            normalizedEmailHash,
-            deviceFingerprintHash: signals.deviceFingerprintHash,
-            deviceCookieHash: signals.deviceCookieHash,
-            ipHash: signals.ipHash,
-            ipPrefixHash: signals.ipPrefixHash,
-            geo: signals.geo,
-            model,
-            createdAt: nowIso,
-          });
-          const nextTrialUsed = Math.max(auth.user.trial?.used || 0, counts.uidCount) + 1;
-          await db.upsertUser(auth.uid, {
-            trial: { used: nextTrialUsed, lastUsedAt: nowIso },
-          });
+          let trialRemaining = Math.max(0, maxTrials - (auth.user.trial?.used || 0));
+          if (!auth.isAdmin) {
+            await db.recordTrialUse({
+              uid: auth.uid,
+              normalizedEmailHash,
+              deviceFingerprintHash: signals.deviceFingerprintHash,
+              deviceCookieHash: signals.deviceCookieHash,
+              ipHash: signals.ipHash,
+              ipPrefixHash: signals.ipPrefixHash,
+              geo: signals.geo,
+              model,
+              createdAt: nowIso,
+            });
+            const nextTrialUsed = Math.max(auth.user.trial?.used || 0, counts.uidCount) + 1;
+            await db.upsertUser(auth.uid, {
+              trial: { used: nextTrialUsed, lastUsedAt: nowIso },
+            });
+            trialRemaining = Math.max(0, maxTrials - nextTrialUsed);
+          }
           await db.recordAiUsageLog({
             uid: auth.uid,
             mode: "trial",
@@ -1554,7 +1572,8 @@ export function createApiMiddleware(
               usage: {
                 mode: "trial",
                 model,
-                trialRemaining: Math.max(0, maxTrials - nextTrialUsed),
+                unlimited: auth.isAdmin,
+                trialRemaining,
               },
             },
             cookieHeaderObj
@@ -1567,33 +1586,36 @@ export function createApiMiddleware(
 
           const aiConfig = await db.getAdminAiConfig();
           const nowIso = new Date().toISOString();
-          const effectiveSubStatus = getEffectiveSubscriptionStatus(auth.user, nowIso);
-          if (effectiveSubStatus !== "active") {
-            return sendJson(res, 402, {
-              error:
-                "Active AI subscription required. Upgrade via KBZPay or use your 3 free trials / BYOK.",
-              code: "SUBSCRIPTION_REQUIRED",
-            });
-          }
-
           const quota = getEffectiveQuotaUsage(auth.user, aiConfig, nowIso);
-          if (quota.dailyUsed >= quota.dailyLimit) {
-            return sendJson(res, 429, {
-              error: `Daily fair-use limit reached (${quota.dailyLimit} messages/day). Resets at 00:00 UTC, or switch to BYOK.`,
-              code: "QUOTA_EXCEEDED",
-            });
-          }
-          if (quota.monthlyUsed >= quota.monthlyLimit) {
-            return sendJson(res, 429, {
-              error: `Monthly fair-use limit reached (${quota.monthlyLimit} messages/month). Switch to BYOK until next cycle.`,
-              code: "QUOTA_EXCEEDED",
-            });
-          }
 
-          if (estimateAttachmentBytes(conversation) > MAX_MANAGED_ATTACHMENT_BYTES) {
-            return sendJson(res, 413, {
-              error: "Attachments exceed the 5 MB limit for managed AI requests.",
-            });
+          if (!auth.isAdmin) {
+            const effectiveSubStatus = getEffectiveSubscriptionStatus(auth.user, nowIso);
+            if (effectiveSubStatus !== "active") {
+              return sendJson(res, 402, {
+                error:
+                  "Active AI subscription required. Upgrade via KBZPay or use your 3 free trials / BYOK.",
+                code: "SUBSCRIPTION_REQUIRED",
+              });
+            }
+
+            if (quota.dailyUsed >= quota.dailyLimit) {
+              return sendJson(res, 429, {
+                error: `Daily fair-use limit reached (${quota.dailyLimit} messages/day). Resets at 00:00 UTC, or switch to BYOK.`,
+                code: "QUOTA_EXCEEDED",
+              });
+            }
+            if (quota.monthlyUsed >= quota.monthlyLimit) {
+              return sendJson(res, 429, {
+                error: `Monthly fair-use limit reached (${quota.monthlyLimit} messages/month). Switch to BYOK until next cycle.`,
+                code: "QUOTA_EXCEEDED",
+              });
+            }
+
+            if (estimateAttachmentBytes(conversation) > MAX_MANAGED_ATTACHMENT_BYTES) {
+              return sendJson(res, 413, {
+                error: "Attachments exceed the 5 MB limit for managed AI requests.",
+              });
+            }
           }
 
           apiKey = resolveAdminSecretKey(aiConfig, "managed");
@@ -1628,14 +1650,16 @@ export function createApiMiddleware(
 
           const nextDailyUsed = quota.dailyUsed + 1;
           const nextMonthlyUsed = quota.monthlyUsed + 1;
-          await db.upsertUser(auth.uid, {
-            quota: {
-              dailyUsed: nextDailyUsed,
-              dailyResetKey: quota.dayKey,
-              monthlyUsed: nextMonthlyUsed,
-              monthlyResetKey: quota.monthKey,
-            },
-          });
+          if (!auth.isAdmin) {
+            await db.upsertUser(auth.uid, {
+              quota: {
+                dailyUsed: nextDailyUsed,
+                dailyResetKey: quota.dayKey,
+                monthlyUsed: nextMonthlyUsed,
+                monthlyResetKey: quota.monthKey,
+              },
+            });
+          }
           await db.recordAiUsageLog({
             uid: auth.uid,
             mode: "managed",
@@ -1654,8 +1678,9 @@ export function createApiMiddleware(
               usage: {
                 mode: "managed",
                 model,
-                dailyRemaining: Math.max(0, quota.dailyLimit - nextDailyUsed),
-                monthlyRemaining: Math.max(0, quota.monthlyLimit - nextMonthlyUsed),
+                unlimited: auth.isAdmin,
+                dailyRemaining: auth.isAdmin ? null : Math.max(0, quota.dailyLimit - nextDailyUsed),
+                monthlyRemaining: auth.isAdmin ? null : Math.max(0, quota.monthlyLimit - nextMonthlyUsed),
               },
             },
             cookieHeaderObj

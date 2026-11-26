@@ -431,14 +431,18 @@ export function AuthModal({
                 <Sparkles size={13} aria-hidden="true" /> AI Plan
               </span>
               <strong>
-                {isSubActive
+                {account.isAdmin
+                  ? "Admin (Unlimited)"
+                  : isSubActive
                   ? `Pro (${sub?.plan === "yearly" ? "Yearly" : "Monthly"})`
                   : sub?.status === "pending"
                   ? "Payment Pending Review"
                   : "Free Tier + BYOK"}
               </strong>
               <small>
-                {isSubActive && quota
+                {account.isAdmin
+                  ? "Unlimited AI usage · No daily or monthly limits"
+                  : isSubActive && quota
                   ? `${quota.monthlyRemaining}/${quota.monthlyLimit} monthly · ${quota.dailyRemaining}/${quota.dailyLimit} today`
                   : `${trial?.remaining ?? 0}/${trial?.limit ?? 3} free AI trials left`}
               </small>

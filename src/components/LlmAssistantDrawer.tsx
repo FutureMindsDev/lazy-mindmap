@@ -189,7 +189,9 @@ export function LlmAssistantDrawer({
 
   const isUsingByok = config.mode === "byok_vault" || config.mode === "byok_session";
   const isDraftByok = draftConfig.mode === "byok_vault" || draftConfig.mode === "byok_session";
-  const isProActive = Boolean(account.authenticated && account.subscription?.status === "active");
+  const isProActive = Boolean(
+    account.authenticated && (account.isAdmin || account.subscription?.status === "active")
+  );
 
   const effectiveRunMode: AiAccessMode = useMemo(() => {
     if (isUsingByok) {
@@ -206,15 +208,17 @@ export function LlmAssistantDrawer({
     if (effectiveRunMode === "managed") {
       return Boolean(
         account.authenticated &&
-          account.subscription?.status === "active" &&
-          (account.quota?.monthlyRemaining ?? 0) > 0 &&
-          (account.quota?.dailyRemaining ?? 0) > 0
+          (account.isAdmin ||
+            (account.subscription?.status === "active" &&
+              (account.quota?.monthlyRemaining ?? 0) > 0 &&
+              (account.quota?.dailyRemaining ?? 0) > 0))
       );
     }
     return Boolean(
       account.authenticated &&
-        (account.user?.emailVerified || !account.firebaseConfigured) &&
-        (account.trial?.remaining ?? 0) > 0
+        (account.isAdmin ||
+          ((account.user?.emailVerified || !account.firebaseConfigured) &&
+            (account.trial?.remaining ?? 0) > 0))
     );
   }, [effectiveRunMode, config.apiKey, account]);
 
@@ -227,10 +231,15 @@ export function LlmAssistantDrawer({
       return `BYOK Vault · ${LLM_PROVIDER_META[p].label}`;
     }
     if (effectiveRunMode === "managed") {
-      return `Pro · ${account.billing.managedModel}`;
+      return account.isAdmin
+        ? `Admin · Unlimited · ${account.billing.managedModel}`
+        : `Pro · ${account.billing.managedModel}`;
     }
     if (!account.authenticated) {
       return `Trial (${account.billing.maxTrialCount} Free)`;
+    }
+    if (account.isAdmin) {
+      return `Admin · Unlimited`;
     }
     return `Trial (${account.trial?.remaining ?? 0}/${account.billing.maxTrialCount})`;
   }, [effectiveRunMode, config.provider, account]);
@@ -605,7 +614,7 @@ export function LlmAssistantDrawer({
         );
         return false;
       }
-      if (account.firebaseConfigured && !account.user?.emailVerified) {
+      if (!account.isAdmin && account.firebaseConfigured && !account.user?.emailVerified) {
         pushPreflightError(
           convId,
           "Please verify your email address in Account Settings before using your 3 free AI trials.",
@@ -613,7 +622,7 @@ export function LlmAssistantDrawer({
         );
         return false;
       }
-      if ((account.trial?.remaining ?? 0) <= 0) {
+      if (!account.isAdmin && (account.trial?.remaining ?? 0) <= 0) {
         pushPreflightError(
           convId,
           `You have used all ${account.billing.maxTrialCount} free AI trials. Upgrade via KBZPay (${account.billing.monthlyPriceMmk.toLocaleString()} MMK/mo) or switch to free BYOK.`,
@@ -828,9 +837,15 @@ export function LlmAssistantDrawer({
                 <UserCheck size={12} aria-hidden="true" /> Sign in for {account.billing.maxTrialCount} Free Tries
               </button>
             ) : isProActive ? (
-              <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
-                {account.quota?.monthlyRemaining ?? 0}/{account.quota?.monthlyLimit ?? 150} left · Pro
-              </button>
+              account.isAdmin ? (
+                <button type="button" className="mf-chip-btn" onClick={() => setSettingsOpen((o) => !o)}>
+                  <ShieldCheck size={12} aria-hidden="true" /> Unlimited · Admin
+                </button>
+              ) : (
+                <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
+                  {account.quota?.monthlyRemaining ?? 0}/{account.quota?.monthlyLimit ?? 150} left · Pro
+                </button>
+              )
             ) : (
               <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
                 <Crown size={12} aria-hidden="true" />{" "}
@@ -899,17 +914,25 @@ export function LlmAssistantDrawer({
                     </div>
                   </>
                 ) : isProActive ? (
-                  <>
+                  account.isAdmin ? (
                     <p className="mf-llm-key-notice">
-                      <strong>Pro Active</strong> ({account.subscription?.plan}) · Model:{" "}
-                      <code>{account.billing.managedModel}</code> · Quota:{" "}
-                      {account.quota?.dailyRemaining}/{account.quota?.dailyLimit} today,{" "}
-                      {account.quota?.monthlyRemaining}/{account.quota?.monthlyLimit} this month.
+                      <strong>Admin · Unlimited</strong> · Model:{" "}
+                      <code>{account.billing.managedModel}</code> · Unlimited AI usage (no daily or
+                      monthly limits).
                     </p>
-                    <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
-                      Manage Subscription / Receipt History
-                    </button>
-                  </>
+                  ) : (
+                    <>
+                      <p className="mf-llm-key-notice">
+                        <strong>Pro Active</strong> ({account.subscription?.plan}) · Model:{" "}
+                        <code>{account.billing.managedModel}</code> · Quota:{" "}
+                        {account.quota?.dailyRemaining}/{account.quota?.dailyLimit} today,{" "}
+                        {account.quota?.monthlyRemaining}/{account.quota?.monthlyLimit} this month.
+                      </p>
+                      <button type="button" className="mf-chip-btn" onClick={onOpenSubscription}>
+                        Manage Subscription / Receipt History
+                      </button>
+                    </>
+                  )
                 ) : (
                   <>
                     <p className="mf-llm-key-notice">
