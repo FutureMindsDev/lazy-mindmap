@@ -13,6 +13,7 @@ import {
   validateExternalBaseUrl,
 } from "../../server/crypto.mjs";
 import { createApiMiddleware } from "../../server/api.mjs";
+import { createMongoDatabase } from "../../server/mongoDb.mjs";
 import {
   LLM_CONFIG_STORAGE_KEY,
   loadLlmConfig,
@@ -558,5 +559,199 @@ describe("Multi-User Maps, BYOK Vault, 3-Trial Anti-Abuse, KBZPay & Admin API", 
     const managedData = await managedChatRes.json();
     expect(managedData.usage.mode).toBe("managed");
     expect(managedData.usage.monthlyRemaining).toBe(149);
+  });
+});
+
+function createInMemoryMongoClient() {
+  const collections = new Map<string, Array<Record<string, any>>>();
+
+  const getByPath = (obj: Record<string, any>, key: string): any => {
+    return key.split(".").reduce((acc, part) => (acc == null ? undefined : acc[part]), obj);
+  };
+
+  const matchesFilter = (doc: Record<string, any>, query: Record<string, any>): boolean => {
+    for (const [key, cond] of Object.entries(query || {})) {
+      if (key === "$or" && Array.isArray(cond)) {
+        if (!cond.some((sub) => matchesFilter(doc, sub))) return false;
+        continue;
+      }
+      const val = getByPath(doc, key);
+      if (cond instanceof RegExp) {
+        if (!cond.test(String(val || ""))) return false;
+      } else if (cond && typeof cond === "object" && !Array.isArray(cond)) {
+        if ("$in" in cond && Array.isArray(cond.$in)) {
+          if (!cond.$in.includes(val)) return false;
+        }
+        if ("$gt" in cond && !(val > cond.$gt)) return false;
+        if ("$gte" in cond && !(val >= cond.$gte)) return false;
+      } else if (val !== cond) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const getCollection = (name: string) => {
+    if (!collections.has(name)) collections.set(name, []);
+    const rows = collections.get(name)!;
+
+    return {
+      async createIndex() {
+        return `${name}_idx`;
+      },
+      async findOne(query: Record<string, any>) {
+        return rows.find((r) => matchesFilter(r, query)) || null;
+      },
+      async insertOne(doc: Record<string, any>) {
+        rows.push({ ...doc });
+        return { insertedId: doc.id || doc.uid || "mock" };
+      },
+      async updateOne(
+        query: Record<string, any>,
+        update: { $set: Record<string, any> },
+        opts?: { upsert?: boolean }
+      ) {
+        const idx = rows.findIndex((r) => matchesFilter(r, query));
+        if (idx >= 0) {
+          rows[idx] = { ...rows[idx], ...update.$set };
+          return { modifiedCount: 1 };
+        }
+        if (opts?.upsert) {
+          rows.push({ ...query, ...update.$set });
+          return { upsertedCount: 1 };
+        }
+        return { modifiedCount: 0 };
+      },
+      async deleteOne(query: Record<string, any>) {
+        const idx = rows.findIndex((r) => matchesFilter(r, query));
+        if (idx >= 0) {
+          rows.splice(idx, 1);
+          return { deletedCount: 1 };
+        }
+        return { deletedCount: 0 };
+      },
+      async findOneAndUpdate(
+        query: Record<string, any>,
+        update: { $set: Record<string, any> }
+      ) {
+        const idx = rows.findIndex((r) => matchesFilter(r, query));
+        if (idx < 0) return null;
+        rows[idx] = { ...rows[idx], ...update.$set };
+        return rows[idx];
+      },
+      async countDocuments(query: Record<string, any> = {}) {
+        return rows.filter((r) => matchesFilter(r, query)).length;
+      },
+      find(query: Record<string, any> = {}) {
+        let result = rows.filter((r) => matchesFilter(r, query));
+        let skipN = 0;
+        let limitN = result.length;
+        const cursor = {
+          sort(spec: Record<string, 1 | -1>) {
+            const [[field, dir]] = Object.entries(spec);
+            result = [...result].sort((a, b) => {
+              const av = getByPath(a, field) ?? "";
+              const bv = getByPath(b, field) ?? "";
+              if (av < bv) return -1 * dir;
+              if (av > bv) return 1 * dir;
+              return 0;
+            });
+            return cursor;
+          },
+          skip(n: number) {
+            skipN = n;
+            return cursor;
+          },
+          limit(n: number) {
+            limitN = n;
+            return cursor;
+          },
+          async toArray() {
+            return result.slice(skipN, skipN + limitN);
+          },
+        };
+        return cursor;
+      },
+      aggregate() {
+        return {
+          async toArray() {
+            return [];
+          },
+        };
+      },
+    };
+  };
+
+  return {
+    async connect() {},
+    db() {
+      return { collection: getCollection };
+    },
+  };
+}
+
+describe("MongoDB Atlas Database Adapter", () => {
+  it("supports user upsert, server-side paginated search/filter, per-user map isolation, and receipt roundtrip", async () => {
+    const mockClient = createInMemoryMongoClient();
+    const db = createMongoDatabase({
+      dbName: "lazymindmap_test",
+      firebaseAuth: { verifyIdToken: async () => ({}) },
+      client: mockClient,
+    });
+
+    expect(db.dbBackend).toBe("mongodb");
+    expect(db.isFirebaseEnabled).toBe(true);
+
+    // Upsert users & test server-side paginated search/filter
+    await db.upsertUser("m_u1", { email: "alice@example.com", displayName: "Alice" });
+    await db.upsertUser("m_u2", { email: "bob@example.com", displayName: "Bob" });
+    await db.upsertUser("m_u3", { email: "carol@example.com", displayName: "Carol" });
+
+    const page1 = await db.listUsersPaginated({ page: 1, pageSize: 2 });
+    expect(page1.total).toBe(3);
+    expect(page1.items).toHaveLength(2);
+    expect(page1.hasNextPage).toBe(true);
+
+    const searchAlice = await db.listUsersPaginated({ page: 1, pageSize: 10, search: "alice" });
+    expect(searchAlice.total).toBe(1);
+    expect(searchAlice.items[0].uid).toBe("m_u1");
+
+    // Per-user cloud maps CRUD & isolation
+    await db.saveUserMap("m_u1", "map-1", { id: "map-1", title: "Alice Mindmap", nodes: { a: {} } });
+    expect(await db.listUserMaps("m_u1")).toHaveLength(1);
+    expect(await db.listUserMaps("m_u2")).toHaveLength(0);
+    expect(await db.getUserMap("m_u2", "map-1")).toBeNull();
+    expect(await db.deleteUserMap("m_u1", "map-1")).toBe(true);
+    expect(await db.listUserMaps("m_u1")).toHaveLength(0);
+
+    // KBZPay receipt binary storage + payment review extending subscription
+    const receiptBuf = Buffer.from("fake-jpeg-receipt-bytes");
+    const savedImg = await db.saveReceiptImage("pay_m1", receiptBuf, "image/jpeg");
+    expect(savedImg.storagePath).toBe("mongo:pay_m1");
+
+    const loadedImg = await db.readReceiptImage(savedImg.storagePath);
+    expect(loadedImg?.mimeType).toBe("image/jpeg");
+    expect(Buffer.compare(loadedImg?.buffer, receiptBuf)).toBe(0);
+
+    await db.createPaymentSubmission({
+      id: "pay_m1",
+      uid: "m_u1",
+      userEmail: "alice@example.com",
+      plan: "monthly",
+      amountMmk: 1000,
+      transactionId: "KBZ_MONGO_001",
+      transactionIdNorm: "KBZ_MONGO_001",
+      storagePath: savedImg.storagePath,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    });
+
+    const reviewRes = await db.reviewPaymentSubmission("pay_m1", {
+      action: "approve",
+      reviewedBy: "admin@lazymindmap.app",
+    });
+    expect(reviewRes.payment.status).toBe("approved");
+    expect(reviewRes.user.subscription.status).toBe("active");
+    expect(reviewRes.user.subscription.plan).toBe("monthly");
   });
 });
