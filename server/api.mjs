@@ -578,6 +578,9 @@ export function createApiMiddleware(
   const mapsDir = path.join(resolvedDataDir, "maps");
   const uploadsDir = path.join(resolvedDataDir, "uploads");
   const db = createDatabase(resolvedDataDir, { forceLocal: Boolean(options.forceLocal) });
+  const cloudMapsRequireAuth = Boolean(
+    db.isFirebaseEnabled || db.dbBackend === "mongodb" || options.requireAuthForCloudMaps
+  );
   const llmFetch = options.llmFetch || globalThis.fetch;
 
   let initPromise = null;
@@ -607,6 +610,7 @@ export function createApiMiddleware(
         return sendJson(res, 200, {
           status: "ok",
           storageDir: resolvedDataDir,
+          dbBackend: db.dbBackend || "local",
           firebaseConfigured: db.isFirebaseEnabled,
           timestamp: new Date().toISOString(),
         });
@@ -1164,7 +1168,7 @@ export function createApiMiddleware(
           const summaries = await db.listUserMaps(auth.uid);
           return sendJson(res, 200, summaries);
         }
-        if (db.isFirebaseEnabled || options.requireAuthForCloudMaps) {
+        if (cloudMapsRequireAuth) {
           return sendJson(res, 401, {
             error: "Sign in to sync cloud maps. Guest maps are saved locally in your browser.",
           });
@@ -1196,7 +1200,7 @@ export function createApiMiddleware(
 
       if (req.method === "POST" && pathname === "/api/maps") {
         const auth = await verifyAuthRequest(req, db, signals);
-        if (!auth.authenticated && (db.isFirebaseEnabled || options.requireAuthForCloudMaps)) {
+        if (!auth.authenticated && cloudMapsRequireAuth) {
           return sendJson(res, 401, { error: "Sign in required for cloud map sync." });
         }
 
@@ -1220,7 +1224,7 @@ export function createApiMiddleware(
 
       if (pathname.startsWith("/api/maps/")) {
         const auth = await verifyAuthRequest(req, db, signals);
-        if (!auth.authenticated && (db.isFirebaseEnabled || options.requireAuthForCloudMaps)) {
+        if (!auth.authenticated && cloudMapsRequireAuth) {
           return sendJson(res, 401, { error: "Sign in required for cloud map sync." });
         }
 

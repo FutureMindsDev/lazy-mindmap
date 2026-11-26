@@ -6,6 +6,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { loadServerEnv } from "./env.mjs";
+import { createMongoDatabase } from "./mongoDb.mjs";
 
 export const CURATED_GEMINI_MODELS = [
   "gemini-3.1-flash-lite",
@@ -32,7 +33,7 @@ export const DEFAULT_AI_CONFIG = {
   updatedBy: null,
 };
 
-function sanitizeId(raw) {
+export function sanitizeId(raw) {
   return String(raw || "").replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 128);
 }
 
@@ -43,7 +44,7 @@ function getExtFromMime(mimeType) {
   return "jpg";
 }
 
-function normalizeUserRecord(uid, raw = {}) {
+export function normalizeUserRecord(uid, raw = {}) {
   const now = new Date().toISOString();
   const sub = raw.subscription && typeof raw.subscription === "object" ? raw.subscription : {};
   const trial = raw.trial && typeof raw.trial === "object" ? raw.trial : {};
@@ -110,16 +111,21 @@ function paginateItems(items, pageRaw, pageSizeRaw) {
 function parseFirebaseAdminConfig() {
   const jsonStr = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
   const credsPath = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || "").trim();
-  const projectId = String(process.env.FIREBASE_PROJECT_ID || "").trim();
+  const projectId = String(
+    process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || ""
+  ).trim();
   const storageBucket = String(process.env.FIREBASE_STORAGE_BUCKET || "").trim();
 
   if (jsonStr) {
     try {
       const parsed = JSON.parse(jsonStr);
       return {
+        authOnly: false,
         credential: cert(parsed),
         projectId: projectId || parsed.project_id,
-        storageBucket: storageBucket || (parsed.project_id ? `${parsed.project_id}.firebasestorage.app` : undefined),
+        storageBucket:
+          storageBucket ||
+          (parsed.project_id ? `${parsed.project_id}.firebasestorage.app` : undefined),
       };
     } catch (err) {
       console.error("[firebase-admin] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", err);
@@ -129,8 +135,17 @@ function parseFirebaseAdminConfig() {
 
   if (credsPath && projectId) {
     return {
+      authOnly: false,
       projectId,
       storageBucket: storageBucket || `${projectId}.firebasestorage.app`,
+    };
+  }
+
+  // With MongoDB Atlas, projectId alone suffices for verifying Firebase Auth ID tokens
+  if (projectId && String(process.env.MONGODB_URI || "").trim()) {
+    return {
+      authOnly: true,
+      projectId,
     };
   }
 
@@ -147,8 +162,14 @@ function getFirebaseAdminServices() {
     return cachedFirebase;
   }
 
-  const app = getApps().length > 0 ? getApp() : initializeApp(cfg);
+  const { authOnly, ...appOpts } = cfg;
+  const app = getApps().length > 0 ? getApp() : initializeApp(appOpts);
   const auth = getAuth(app);
+  if (authOnly) {
+    cachedFirebase = { enabled: true, app, auth, firestore: null, bucket: null };
+    return cachedFirebase;
+  }
+
   const firestore = getFirestore(app);
   let bucket = null;
   try {
@@ -164,9 +185,10 @@ function getFirebaseAdminServices() {
 
 /**
  * Creates a unified async database & receipt storage adapter.
- * Uses Cloud Firestore + Firebase Storage when Admin credentials are configured,
- * and falls back cleanly to local filesystem JSON collections in `dataDir/db` for
- * local dev and automated Vitest runs.
+ * Priority:
+ * 1. MongoDB Atlas (`MONGODB_URI`, paired with Firebase Auth token verification)
+ * 2. Cloud Firestore + Firebase Storage (`FIREBASE_SERVICE_ACCOUNT_JSON` / `GOOGLE_APPLICATION_CREDENTIALS`)
+ * 3. Local filesystem JSON collections (`dataDir/db`) for dev & Vitest runs
  */
 export function createDatabase(
   dataDir = process.env.DATA_DIR || path.resolve(process.cwd(), "data"),
@@ -177,6 +199,15 @@ export function createDatabase(
   const fb = forceLocal
     ? { enabled: false, app: null, auth: null, firestore: null, bucket: null }
     : getFirebaseAdminServices();
+
+  const mongoUri = !forceLocal ? String(process.env.MONGODB_URI || "").trim() : "";
+  if (mongoUri) {
+    return createMongoDatabase({
+      uri: mongoUri,
+      dbName: String(process.env.MONGODB_DB_NAME || "lazymindmap").trim() || "lazymindmap",
+      firebaseAuth: fb.auth,
+    });
+  }
 
   const resolvedDataDir = path.resolve(dataDir);
   const dbDir = path.join(resolvedDataDir, "db");
@@ -265,6 +296,7 @@ export function createDatabase(
     const fsDb = fb.firestore;
 
     return {
+      dbBackend: "firestore",
       isFirebaseEnabled: true,
       getFirebaseAuth: () => fb.auth,
 
@@ -742,6 +774,7 @@ export function createDatabase(
   // Local Filesystem JSON Adapter (Dev & Vitest fallback)
   // ---------------------------------------------------------------------------
   return {
+    dbBackend: "local",
     isFirebaseEnabled: false,
     getFirebaseAuth: () => null,
 
