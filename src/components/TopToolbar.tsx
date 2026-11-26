@@ -80,6 +80,7 @@ interface TopToolbarProps {
   onChangeAutoSaveInterval: (seconds: number) => void;
   onToggleDarkLight: () => void;
   onOpenLlmChat: () => void;
+  onCloseLlmChat?: () => void;
   onOpenSearch: () => void;
   onSaveNow: () => void;
   onExportAction: (fmt: string) => void;
@@ -236,6 +237,7 @@ export function TopToolbar({
   onChangeAutoSaveInterval,
   onToggleDarkLight,
   onOpenLlmChat,
+  onCloseLlmChat,
   onOpenSearch,
   onSaveNow,
   onExportAction,
@@ -470,7 +472,10 @@ export function TopToolbar({
           aria-expanded={menuOpen}
           aria-controls={menuId}
           title="Settings, Layout, Export & Help"
-          onClick={() => setMenuOpen((o) => !o)}
+          onClick={() => {
+            onCloseLlmChat?.();
+            setMenuOpen((o) => !o);
+          }}
         >
           {menuOpen ? <X size={17} aria-hidden="true" /> : <Menu size={17} aria-hidden="true" />}
           <span>Menu</span>

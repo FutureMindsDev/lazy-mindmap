@@ -53,6 +53,7 @@ import { renderRichNodeContent } from "../utils/llmMathNormalizer";
 import {
   buildMindMapSystemPrompt,
   callLlmProvider,
+  clearLlmComposerDraft,
   createNewConversation,
   deriveConversationTitle,
   findRelatedNodes,
@@ -60,11 +61,16 @@ import {
   LLM_PROVIDER_META,
   LlmApiError,
   loadActiveConversationId,
+  loadLlmComposerDraftAsync,
+  loadLlmComposerDraftSync,
   loadLlmConfig,
   loadLlmConversations,
   parseAndApplyLlmResponse,
   readFileForChat,
   saveActiveConversationId,
+  saveLlmComposerDraft,
+  saveLlmComposerDraftIdb,
+  saveLlmComposerDraftSync,
   saveLlmConfig,
   saveLlmConversations,
 } from "../utils/llmMindMapAgent";
@@ -186,8 +192,14 @@ export function LlmAssistantDrawer({
   const [activeConversationId, setActiveConversationId] = useState<string>(() =>
     loadActiveConversationId(conversations)
   );
-  const [prompt, setPrompt] = useState("");
-  const [stagedFiles, setStagedFiles] = useState<LlmChatFile[]>([]);
+  const initialDraftRef = useRef<ReturnType<typeof loadLlmComposerDraftSync> | null>(null);
+  if (initialDraftRef.current === null) {
+    initialDraftRef.current = loadLlmComposerDraftSync();
+  }
+  const [prompt, setPrompt] = useState<string>(() => initialDraftRef.current?.prompt || "");
+  const [stagedFiles, setStagedFiles] = useState<LlmChatFile[]>(
+    () => initialDraftRef.current?.files || []
+  );
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [sending, setSending] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -195,6 +207,13 @@ export function LlmAssistantDrawer({
   const [errorCodes, setErrorCodes] = useState<Record<string, string>>({});
   const [drawerWidth, setDrawerWidth] = useState<number>(() => loadSavedDrawerWidth());
   const [isResizing, setIsResizing] = useState(false);
+
+  const draftDirtyRef = useRef(false);
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
+  const stagedFilesRef = useRef(stagedFiles);
+  stagedFilesRef.current = stagedFiles;
+  const draftIdbTimerRef = useRef<number | null>(null);
 
   const drawerId = useId();
   const inputId = useId();
@@ -387,6 +406,91 @@ export function LlmAssistantDrawer({
     }
   }, [activeConversation?.id]);
 
+  // Hydrate oversized draft files (and any IDB-only draft) without overwriting edits made before IDB resolves
+  useEffect(() => {
+    let cancelled = false;
+    const initial = initialDraftRef.current;
+    void loadLlmComposerDraftAsync().then((idbDraft) => {
+      if (cancelled || draftDirtyRef.current || !idbDraft) return;
+      if (
+        idbDraft.files.length > 0 &&
+        ((initial?.files.length || 0) === 0 || idbDraft.updatedAt >= (initial?.updatedAt || 0))
+      ) {
+        stagedFilesRef.current = idbDraft.files;
+        setStagedFiles(idbDraft.files);
+      }
+      if (!initial?.prompt && idbDraft.prompt) {
+        promptRef.current = idbDraft.prompt;
+        setPrompt(idbDraft.prompt);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Flush pending draft writes if user reloads or closes the browser tab
+  useEffect(() => {
+    const flushDraft = () => {
+      if (!draftDirtyRef.current) return;
+      if (draftIdbTimerRef.current !== null) {
+        window.clearTimeout(draftIdbTimerRef.current);
+        draftIdbTimerRef.current = null;
+      }
+      saveLlmComposerDraftSync(promptRef.current, stagedFilesRef.current);
+      void saveLlmComposerDraftIdb(promptRef.current, stagedFilesRef.current);
+    };
+    window.addEventListener("pagehide", flushDraft);
+    window.addEventListener("beforeunload", flushDraft);
+    return () => {
+      window.removeEventListener("pagehide", flushDraft);
+      window.removeEventListener("beforeunload", flushDraft);
+      if (draftIdbTimerRef.current !== null) {
+        window.clearTimeout(draftIdbTimerRef.current);
+        draftIdbTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const updatePromptDraft = (nextPrompt: string) => {
+    draftDirtyRef.current = true;
+    promptRef.current = nextPrompt;
+    setPrompt(nextPrompt);
+    saveLlmComposerDraftSync(nextPrompt, stagedFilesRef.current);
+    if (draftIdbTimerRef.current !== null) {
+      window.clearTimeout(draftIdbTimerRef.current);
+    }
+    draftIdbTimerRef.current = window.setTimeout(() => {
+      draftIdbTimerRef.current = null;
+      void saveLlmComposerDraftIdb(promptRef.current, stagedFilesRef.current);
+    }, 250);
+  };
+
+  const updateStagedFilesDraft = (updater: (prev: LlmChatFile[]) => LlmChatFile[]) => {
+    draftDirtyRef.current = true;
+    if (draftIdbTimerRef.current !== null) {
+      window.clearTimeout(draftIdbTimerRef.current);
+      draftIdbTimerRef.current = null;
+    }
+    const nextFiles = updater(stagedFilesRef.current);
+    stagedFilesRef.current = nextFiles;
+    setStagedFiles(nextFiles);
+    void saveLlmComposerDraft(promptRef.current, nextFiles);
+  };
+
+  const resetComposerDraft = () => {
+    draftDirtyRef.current = true;
+    if (draftIdbTimerRef.current !== null) {
+      window.clearTimeout(draftIdbTimerRef.current);
+      draftIdbTimerRef.current = null;
+    }
+    promptRef.current = "";
+    stagedFilesRef.current = [];
+    setPrompt("");
+    setStagedFiles([]);
+    void clearLlmComposerDraft();
+  };
+
   useEffect(() => {
     if (open) {
       requestAnimationFrame(() => {
@@ -431,7 +535,7 @@ export function LlmAssistantDrawer({
       for (const file of incoming) {
         processed.push(await readFileForChat(file));
       }
-      setStagedFiles((prev) => [...prev, ...processed]);
+      updateStagedFilesDraft((prev) => [...prev, ...processed]);
       onAnnounce(`Staged ${processed.length} file(s) for AI prompt`);
     } catch (err) {
       onAnnounce(err instanceof Error ? err.message : "Failed to attach file");
@@ -575,8 +679,7 @@ export function LlmAssistantDrawer({
     setConversations((prev) => [fresh, ...prev]);
     setActiveConversationId(fresh.id);
     setHistoryViewOpen(false);
-    setPrompt("");
-    setStagedFiles([]);
+    resetComposerDraft();
     onAnnounce("Started a new AI conversation");
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -761,8 +864,7 @@ export function LlmAssistantDrawer({
 
     const nextHistory = [...activeConversation.messages, userMessage];
     updateConversationMessages(convId, () => nextHistory);
-    setPrompt("");
-    setStagedFiles([]);
+    resetComposerDraft();
     setHistoryViewOpen(false);
 
     if (!checkPreflightAccess(convId)) return;
@@ -1604,7 +1706,7 @@ export function LlmAssistantDrawer({
                     className="mf-llm-staged-remove"
                     aria-label={`Remove ${f.name}`}
                     onClick={() =>
-                      setStagedFiles((prev) => prev.filter((item) => item.id !== f.id))
+                      updateStagedFilesDraft((prev) => prev.filter((item) => item.id !== f.id))
                     }
                   >
                     <X size={11} aria-hidden="true" />
@@ -1625,7 +1727,7 @@ export function LlmAssistantDrawer({
               className="mf-llm-textarea"
               placeholder="Paste prompt or describe nodes to create/modify… (Enter to send, Shift+Enter for newline)"
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => updatePromptDraft(e.target.value)}
               onKeyDown={handleTextareaKeyDown}
               onPaste={(e) => void handlePaste(e)}
             />

@@ -20,6 +20,19 @@ export const LLM_CONFIG_STORAGE_KEY = "lazymindmap:llmConfig";
 export const LLM_HISTORY_STORAGE_KEY = "lazymindmap:llmChatHistory";
 export const LLM_CONVERSATIONS_STORAGE_KEY = "lazymindmap:llmConversations";
 export const LLM_ACTIVE_CONV_STORAGE_KEY = "lazymindmap:llmActiveConversationId";
+export const LLM_DRAFT_STORAGE_KEY = "lazymindmap:llmComposerDraft";
+
+const LLM_DRAFT_IDB_NAME = "lazymindmap_llm_draft_db";
+const LLM_DRAFT_IDB_STORE = "drafts";
+const LLM_DRAFT_IDB_KEY = "active";
+const LLM_DRAFT_LS_FILES_MAX_CHARS = 1_500_000;
+
+export interface LlmComposerDraft {
+  prompt: string;
+  files: LlmChatFile[];
+  updatedAt: number;
+  hasIdbFiles?: boolean;
+}
 
 export const LLM_PROVIDER_META: Record<
   LlmProviderId,
@@ -273,6 +286,182 @@ export function saveActiveConversationId(id: string): void {
   } catch {
     // Ignore storage errors
   }
+}
+
+function sanitizeDraftFiles(raw: unknown): LlmChatFile[] {
+  if (!Array.isArray(raw)) return [];
+  const valid: LlmChatFile[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const f = item as Partial<LlmChatFile>;
+    if (
+      typeof f.id !== "string" ||
+      typeof f.name !== "string" ||
+      typeof f.url !== "string" ||
+      typeof f.mimeType !== "string" ||
+      typeof f.size !== "number" ||
+      !Number.isFinite(f.size)
+    ) {
+      continue;
+    }
+    const clean: LlmChatFile = {
+      id: f.id,
+      name: f.name,
+      url: f.url,
+      mimeType: f.mimeType,
+      size: f.size,
+    };
+    if (typeof f.textContent === "string") clean.textContent = f.textContent;
+    if (typeof f.dataUrl === "string") clean.dataUrl = f.dataUrl;
+    valid.push(clean);
+  }
+  return valid;
+}
+
+function estimateDraftFilesChars(files: LlmChatFile[]): number {
+  let total = 0;
+  for (const f of files) {
+    total +=
+      f.url.length +
+      (f.textContent ? f.textContent.length : 0) +
+      (f.dataUrl ? f.dataUrl.length : 0) +
+      128;
+  }
+  return total;
+}
+
+function openLlmDraftIdb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const req = indexedDB.open(LLM_DRAFT_IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(LLM_DRAFT_IDB_STORE)) {
+        db.createObjectStore(LLM_DRAFT_IDB_STORE, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export function loadLlmComposerDraftSync(): LlmComposerDraft {
+  try {
+    const raw = localStorage.getItem(LLM_DRAFT_STORAGE_KEY);
+    if (!raw) return { prompt: "", files: [], updatedAt: 0 };
+    const parsed = JSON.parse(raw) as Partial<LlmComposerDraft>;
+    if (!parsed || typeof parsed !== "object") {
+      return { prompt: "", files: [], updatedAt: 0 };
+    }
+    return {
+      prompt: typeof parsed.prompt === "string" ? parsed.prompt : "",
+      files: sanitizeDraftFiles(parsed.files),
+      updatedAt:
+        typeof parsed.updatedAt === "number" && Number.isFinite(parsed.updatedAt)
+          ? parsed.updatedAt
+          : 0,
+      hasIdbFiles: Boolean(parsed.hasIdbFiles),
+    };
+  } catch {
+    return { prompt: "", files: [], updatedAt: 0 };
+  }
+}
+
+export function saveLlmComposerDraftSync(prompt: string, files: LlmChatFile[]): void {
+  try {
+    if (!prompt && files.length === 0) {
+      localStorage.removeItem(LLM_DRAFT_STORAGE_KEY);
+      return;
+    }
+    const now = Date.now();
+    const shouldInlineFiles = estimateDraftFilesChars(files) <= LLM_DRAFT_LS_FILES_MAX_CHARS;
+    const payload: LlmComposerDraft = shouldInlineFiles
+      ? { prompt, files, updatedAt: now }
+      : { prompt, files: [], updatedAt: now, hasIdbFiles: files.length > 0 };
+    try {
+      localStorage.setItem(LLM_DRAFT_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Fallback: if QuotaExceededError happens even under threshold, keep prompt text safely
+      const fallback: LlmComposerDraft = {
+        prompt,
+        files: [],
+        updatedAt: now,
+        hasIdbFiles: files.length > 0,
+      };
+      localStorage.setItem(LLM_DRAFT_STORAGE_KEY, JSON.stringify(fallback));
+    }
+  } catch {
+    // Ignore storage quota / private mode errors
+  }
+}
+
+export async function loadLlmComposerDraftAsync(): Promise<LlmComposerDraft | null> {
+  try {
+    const db = await openLlmDraftIdb();
+    const record = await new Promise<{
+      id?: string;
+      prompt?: unknown;
+      files?: unknown;
+      updatedAt?: unknown;
+    } | null>((resolve, reject) => {
+      const tx = db.transaction(LLM_DRAFT_IDB_STORE, "readonly");
+      const req = tx.objectStore(LLM_DRAFT_IDB_STORE).get(LLM_DRAFT_IDB_KEY);
+      req.onsuccess = () => resolve((req.result as Record<string, unknown>) || null);
+      req.onerror = () => reject(req.error);
+    });
+    if (!record) return null;
+    return {
+      prompt: typeof record.prompt === "string" ? record.prompt : "",
+      files: sanitizeDraftFiles(record.files),
+      updatedAt:
+        typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
+          ? record.updatedAt
+          : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLlmComposerDraftIdb(prompt: string, files: LlmChatFile[]): Promise<void> {
+  try {
+    const db = await openLlmDraftIdb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(LLM_DRAFT_IDB_STORE, "readwrite");
+      const store = tx.objectStore(LLM_DRAFT_IDB_STORE);
+      if (!prompt && files.length === 0) {
+        store.delete(LLM_DRAFT_IDB_KEY);
+      } else {
+        store.put({
+          id: LLM_DRAFT_IDB_KEY,
+          prompt,
+          files,
+          updatedAt: Date.now(),
+        });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // Ignore IDB errors in restricted/private environments
+  }
+}
+
+export async function saveLlmComposerDraft(prompt: string, files: LlmChatFile[]): Promise<void> {
+  saveLlmComposerDraftSync(prompt, files);
+  await saveLlmComposerDraftIdb(prompt, files);
+}
+
+export async function clearLlmComposerDraft(): Promise<void> {
+  try {
+    localStorage.removeItem(LLM_DRAFT_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+  await saveLlmComposerDraftIdb("", []);
 }
 
 const TEXT_FILE_EXTENSIONS = new Set([

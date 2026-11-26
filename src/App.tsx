@@ -2146,6 +2146,7 @@ export function App() {
           announce(`Switched to ${target} theme`);
         }}
         onOpenLlmChat={() => setLlmChatOpen(true)}
+        onCloseLlmChat={() => setLlmChatOpen(false)}
         onOpenSearch={() => {
           setSearchOpen(true);
           requestAnimationFrame(() => searchInputRef.current?.focus());
